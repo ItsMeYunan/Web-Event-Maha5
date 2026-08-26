@@ -16,9 +16,7 @@ def parse_duration(text):
     return amount * 3600
 
 async def build_candidate(guild, raw_name, index, colors):
-    # fetch_member instead of the cached get_member so the bot doesn't need
-    # the privileged Members intent (and its full-guild-member RAM cost) -
-    # only pays the API call when a candidate is actually a mention.
+    # fetch_member instead of the cached get_member so the bot doesn't need the privileged Members intent
     color = colors[index % len(colors)]
     m = re.match(r"^<@!?(\d+)>$", raw_name)
     if m:
