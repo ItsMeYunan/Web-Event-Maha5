@@ -1,4 +1,4 @@
-# Configurable via this file or commands
+# Toggle live vote setting via commands or this file
 vote:
   cooldown_seconds: 0        # 0 = one-time only; >0 = seconds between re-votes
   require_voice_channel: false   # true = must be in a voice channel to vote
@@ -7,7 +7,7 @@ vote:
 web:
   host: "127.0.0.1"
   port: 8080
-  base_url: "http://127.0.0.1:8080"   # used to build links
+  base_url: "http://127.0.0.1:8080"   # used to build session links
 
 ui:
   max_bar_width_px: 600      # max container size for horizontal bars
@@ -22,4 +22,6 @@ widget:
     - "#d62728"
 
 bot:
-  token: "YOUR_BOT_TOKEN"
+  token: ""
+  dev_guild_id: null   # set to a guild id for instant slash-command sync while developing; null = global sync (prod, can take ~1hr to propagate)
+  debug: false          # true = verbose (DEBUG-level) logging for discord.py and this bot
