@@ -1,0 +1,39 @@
+# ==============================================================================
+# DISCORD LIVE REAL-TIME VOTING & STREAM OVERLAY - CONFIGURATION
+# Shared Configuration File for Python Bot & Bun Backend
+# ==============================================================================
+
+server:
+  host: "0.0.0.0"
+  port: 3000
+  base_url: "http://localhost:3000"
+  admin_key: "maha5_live_secret_key_2026"
+
+discord:
+  command_prefix: "!vote"
+  admin_role_ids:
+    - 112233445566778899
+  target_guild_id: 998877665544332211
+  target_stage_channel_id: 123456789012345678
+  voice_gate_enabled: true
+
+voting:
+  default_duration_seconds: 300
+  min_duration_seconds: 10
+  max_duration_seconds: 3600
+  vote_mode: "ONE_TIME" # Options: ONE_TIME | COOLDOWN
+  cooldown_seconds: 15
+  candidate_colors:
+    - "#06B6D4" # Cyan
+    - "#FACC15" # Yellow
+    - "#FB923C" # Orange
+    - "#A855F7" # Purple
+    - "#10B981" # Emerald
+    - "#EC4899" # Pink
+    - "#3B82F6" # Blue
+    - "#84CC16" # Lime
+
+ui:
+  theme: "pet-care-dashboard"
+  max_bar_width: 600
+  enable_rank_animation: true
