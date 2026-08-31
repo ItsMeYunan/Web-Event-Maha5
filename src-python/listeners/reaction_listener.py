@@ -1,11 +1,10 @@
 """
 Reaction Vote Listener
-Captures emoji reactions (1️⃣..🔟) on the poll embed message, validates Stage Gate, and submits to backend.
+Captures emoji reactions (1️⃣..🔟) on the poll embed message, validates Stage Gate dynamically, and submits to backend.
 """
 import discord
 from discord.ext import commands
 import logging
-from typing import Optional
 
 try:
     from commands.vote_cmd import VoteCommands
@@ -79,13 +78,16 @@ class ReactionVoteListener(commands.Cog):
             return
 
         member = payload.member or guild.get_member(payload.user_id)
-        if not member or member.bot:
+        if not member or getattr(member, "bot", False):
             return
 
-        # 1. Stage Gate Check
-        if not self.stage_gate.is_eligible(member):
+        # 1. Dynamic Stage Gate Check
+        stage_channel_id = session_data.get("stage_channel_id")
+        is_gated = session_data.get("is_gated", self.stage_gate.voice_gate_enabled)
+
+        if is_gated and not self.stage_gate.is_eligible(member, session_stage_channel_id=stage_channel_id):
             logger.info(
-                f"Reaction vote from {member.name} ({member.id}) REJECTED: Not in required Stage Channel. Removing reaction."
+                f"Reaction vote from {member.name} ({member.id}) REJECTED: Not in required Stage Channel ({stage_channel_id}). Removing reaction."
             )
             # Remove the non-eligible member's reaction
             try:
@@ -100,15 +102,15 @@ class ReactionVoteListener(commands.Cog):
             return
 
         # 2. Submit Vote to Backend
-        avatar_url = str(member.display_avatar.url) if member.display_avatar else None
+        avatar_url = str(member.display_avatar.url) if getattr(member, "display_avatar", None) else None
         try:
             await self.api.process_vote(
                 session_id=session_id,
                 user_id=str(member.id),
-                username=member.display_name,
+                username=getattr(member, "display_name", str(member.id)),
                 key_code=key_code,
                 avatar_url=avatar_url
             )
-            logger.info(f"Reaction vote recorded: {member.display_name} -> [{key_code}] in session {session_id}")
+            logger.info(f"Reaction vote recorded: {getattr(member, 'display_name', member)} -> [{key_code}] in session {session_id}")
         except Exception as e:
             logger.warning(f"Failed to submit reaction vote to backend: {e}")

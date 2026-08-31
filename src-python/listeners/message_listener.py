@@ -5,7 +5,6 @@ Captures chat messages like '1', '2', etc. in voting channels, validates Stage G
 import discord
 from discord.ext import commands
 import logging
-from typing import Optional
 
 try:
     from commands.vote_cmd import VoteCommands
@@ -60,25 +59,28 @@ class MessageVoteListener(commands.Cog):
         if key_code not in valid_keys:
             return
 
-        # 1. Stage Gate Check
+        # 1. Dynamic Stage Gate Check for this specific session
         member = message.author
-        if not self.stage_gate.is_eligible(member):
+        stage_channel_id = session_data.get("stage_channel_id")
+        is_gated = session_data.get("is_gated", self.stage_gate.voice_gate_enabled)
+
+        if is_gated and not self.stage_gate.is_eligible(member, session_stage_channel_id=stage_channel_id):
             logger.info(
-                f"Vote from {member.name} ({member.id}) REJECTED: Not in required Stage Channel."
+                f"Vote from {member.name} ({member.id}) REJECTED: Not in required Stage Channel ({stage_channel_id})."
             )
             # Silent rejection per PRD / SRS spec
             return
 
         # 2. Submit Vote to Backend
-        avatar_url = str(member.display_avatar.url) if member.display_avatar else None
+        avatar_url = str(member.display_avatar.url) if getattr(member, "display_avatar", None) else None
         try:
             await self.api.process_vote(
                 session_id=session_id,
                 user_id=str(member.id),
-                username=member.display_name,
+                username=getattr(member, "display_name", str(member.id)),
                 key_code=key_code,
                 avatar_url=avatar_url
             )
-            logger.info(f"Vote recorded: {member.display_name} -> [{key_code}] in session {session_id}")
+            logger.info(f"Vote recorded: {getattr(member, 'display_name', member)} -> [{key_code}] in session {session_id}")
         except Exception as e:
             logger.warning(f"Failed to submit vote to backend: {e}")

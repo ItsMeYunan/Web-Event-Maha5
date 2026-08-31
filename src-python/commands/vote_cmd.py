@@ -4,10 +4,12 @@ Handles Discord slash and prefix commands:
 - !vote initiate <#channel> <duration> <cand1> <cand2> ...
 - !vote stop <#channel>
 - !vote cancel <#channel>
+- !vote info
 """
 import discord
+from discord import app_commands
 from discord.ext import commands
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import logging
 
 try:
@@ -47,7 +49,7 @@ class VoteCommands(commands.Cog):
         """Root command: !vote"""
         embed = discord.Embed(
             title="🗳️ Discord Live Real-Time Voting System",
-            description="Perintah yang tersedia untuk mengelola sesi live voting:",
+            description="Perintah yang tersedia untuk mengelola sesi live voting (mendukung server mana pun):",
             color=0x0284C7
         )
         embed.add_field(
@@ -65,6 +67,25 @@ class VoteCommands(commands.Cog):
             value="Membatalkan sesi voting tanpa menyimpan hasil.",
             inline=False
         )
+        embed.add_field(
+            name="`!vote info`",
+            value="Melihat status konfigurasi bot dan koneksi server aktif saat ini.",
+            inline=False
+        )
+        await ctx.reply(embed=embed)
+
+    @vote_group.command(name="info")
+    async def info(self, ctx: commands.Context):
+        """Display active server diagnostics."""
+        embed = discord.Embed(
+            title="⚙️ Status Konfigurasi Bot Voting",
+            color=0x10B981
+        )
+        embed.add_field(name="🌐 Backend URL", value=f"`{self.config.server.base_url}`", inline=True)
+        embed.add_field(name="🔑 Auth Key", value="`" + ("*" * 8) + self.config.server.admin_key[-4:] + "`" if len(self.config.server.admin_key) > 4 else "`SET`", inline=True)
+        embed.add_field(name="🎙️ Voice Gating", value="✅ Aktif" if self.config.discord.voice_gate_enabled else "❌ Non-aktif (Bebas untuk semua)", inline=True)
+        embed.add_field(name="📊 Sesi Aktif di Bot", value=f"{len(self.active_sessions)} sesi berjalan", inline=True)
+        embed.set_footer(text=f"Guild: {ctx.guild.name} ({ctx.guild.id})")
         await ctx.reply(embed=embed)
 
     @vote_group.command(name="initiate")
@@ -78,9 +99,9 @@ class VoteCommands(commands.Cog):
         """
         !vote initiate #live-stage 5m MrAlpha MrBravo MrCharlie
         """
-        # 1. Check Permissions
+        # 1. Check Permissions (Works on ANY Discord server)
         if not is_voting_admin(ctx.author, self.config.discord.admin_role_ids):
-            await ctx.reply("❌ **Akses Ditolak:** Anda tidak memiliki izin untuk memulai sesi voting.", ephemeral=True)
+            await ctx.reply("❌ **Akses Ditolak:** Anda membutuhkan izin `Administrator` / `Manage Channels` untuk memulai voting.", ephemeral=True)
             return
 
         # 2. Check Active Session on Target Channel
@@ -120,47 +141,64 @@ class VoteCommands(commands.Cog):
                 "colorHex": color,
             })
 
-        # 6. Call Backend API
-        stage_chan = ctx.guild.get_channel(self.config.discord.target_stage_channel_id) if (ctx.guild and self.config.discord.target_stage_channel_id) else None
-        stage_name = f"#{getattr(stage_chan, 'name', 'live-stage')}" if stage_chan else "#live-stage"
+        # 6. Dynamic Stage Gate Resolution (Works on ANY Discord server)
+        # Priority 1: If admin author is currently in a Stage/Voice channel on THIS server
+        detected_stage_id = None
+        detected_stage_name = None
         
+        if getattr(ctx.author, "voice", None) and ctx.author.voice.channel:
+            detected_stage_id = ctx.author.voice.channel.id
+            detected_stage_name = f"#{ctx.author.voice.channel.name}"
+        elif self.config.discord.target_stage_channel_id and ctx.guild:
+            stage_obj = ctx.guild.get_channel(self.config.discord.target_stage_channel_id)
+            if stage_obj:
+                detected_stage_id = stage_obj.id
+                detected_stage_name = f"#{stage_obj.name}"
+
+        # If voice_gate_enabled is True but no stage is found, allow open voting or warn
+        is_gated = self.config.discord.voice_gate_enabled and (detected_stage_id is not None)
+        stage_display = detected_stage_name or ("#live-stage" if is_gated else "Semua Member")
+
+        # 7. Call Backend API
+        guild_id = str(ctx.guild.id) if ctx.guild else "0"
         try:
             res = await self.api.create_session(
                 title=f"Voting Live: {', '.join(candidates[:2])}...",
                 candidates=candidate_payloads,
                 duration_seconds=duration_secs,
                 channel_id=str(channel.id),
-                guild_id=str(ctx.guild.id),
+                guild_id=guild_id,
                 vote_mode=self.config.voting.vote_mode,
                 cooldown_seconds=self.config.voting.cooldown_seconds,
-                is_stage_gated=self.config.discord.voice_gate_enabled,
-                stage_name=stage_name
+                is_stage_gated=is_gated,
+                stage_name=stage_display
             )
         except Exception as e:
-            await ctx.reply(f"❌ **Gagal menghubungi Backend:** {e}")
+            await ctx.reply(f"❌ **Gagal menghubungi Backend ({self.config.server.base_url}):** {e}\n*Pastikan backend server sudah berjalan.*")
             return
 
         session_id = res.get("sessionId")
         webui_url = f"{self.config.server.base_url}/webui"
         widget_url = f"{self.config.server.base_url}/widget"
 
-        # 7. Record Active Session
+        # 8. Record Active Session with Dynamic Stage Channel ID
         self.active_sessions[channel.id] = session_id
         self.session_meta[session_id] = {
             "channel_id": channel.id,
-            "guild_id": ctx.guild.id,
+            "guild_id": ctx.guild.id if ctx.guild else None,
             "candidates": candidate_payloads,
             "duration": duration_secs,
+            "stage_channel_id": detected_stage_id,
+            "is_gated": is_gated
         }
 
-        # 8. Send Discord Embed to Target Channel
+        # 9. Send Discord Embed to Target Channel
         embed = discord.Embed(
             title="🔥 SESI LIVE VOTING DIMULAI!",
             description=(
                 f"Voting telah dibuka selama **{format_duration(duration_secs)}**!\n"
                 f"Ketik angka nomor pilihan Anda di chat ini untuk memberikan suara.\n"
-                f"*(Hanya member yang berada di {stage_name} yang suaranya sah)*"
-                if self.config.discord.voice_gate_enabled else "Ketik angka nomor pilihan Anda di chat ini!"
+                + (f"*(Hanya member yang berada di {stage_display} yang suaranya sah)*" if is_gated else "*(Terbuka untuk seluruh member)*")
             ),
             color=0x06B6D4
         )
@@ -173,7 +211,7 @@ class VoteCommands(commands.Cog):
         embed.add_field(name="⏱️ Durasi", value=format_duration(duration_secs), inline=True)
         embed.add_field(name="📊 Web UI Dashboard", value=f"[Buka Dashboard]({webui_url})", inline=True)
         embed.add_field(name="📺 OBS Overlay", value=f"[Link Widget]({widget_url})", inline=True)
-        embed.set_footer(text=f"Session ID: {session_id} • Maha5 Live System")
+        embed.set_footer(text=f"Session ID: {session_id} • Server: {ctx.guild.name if ctx.guild else 'Discord'}")
 
         poll_msg = await channel.send(embed=embed)
 
@@ -187,7 +225,7 @@ class VoteCommands(commands.Cog):
 
         self.session_meta[session_id]["poll_message_id"] = poll_msg.id
 
-        # 9. Start Asyncio Timer Task with on_expire Auto-Stop
+        # 10. Start Asyncio Timer Task with on_expire Auto-Stop
         async def on_expire(s_id: str):
             await self._handle_auto_stop(s_id, channel)
 
@@ -206,10 +244,9 @@ class VoteCommands(commands.Cog):
             self.active_sessions.pop(meta["channel_id"], None)
 
         try:
-            result = await self.api.stop_session(session_id)
+            await self.api.stop_session(session_id)
         except Exception as e:
             logger.error(f"Error notifying backend of auto-stop: {e}")
-            result = {}
 
         # Send Ending Embed
         embed = discord.Embed(
