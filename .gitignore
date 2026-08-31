@@ -2,13 +2,6 @@
 # Git Ignore - Discord Live Voting & Stream Overlay
 # ==============================================================================
 
-# Private Specification Documents (Keep only README.md for Git)
-01-PRD/
-02-SRS/
-03-SDD/
-04-UI-UX-DESIGN/
-05-TASK-BREAKDOWN/
-
 # Environment Variables & Secrets
 .env
 .env.local
