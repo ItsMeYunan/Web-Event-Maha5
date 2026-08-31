@@ -35,6 +35,11 @@ venv/
 env/
 ENV/
 
+# Scratch and Temporary Scripts
+scratch_*.py
+search_notion.py
+update_notion.py
+
 # Logs & Debug
 logs/
 *.log
