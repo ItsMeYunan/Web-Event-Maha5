@@ -1,0 +1,56 @@
+# ==============================================================================
+# Git Ignore - Discord Live Voting & Stream Overlay
+# ==============================================================================
+
+# Private Specification Documents (Keep only README.md for Git)
+01-PRD/
+02-SRS/
+03-SDD/
+04-UI-UX-DESIGN/
+05-TASK-BREAKDOWN/
+
+# Environment Variables & Secrets
+.env
+.env.local
+.env.*.local
+*.pem
+
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build Outputs
+dist/
+build/
+.svelte-kit/
+package/
+
+# Python Cache & Virtual Environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+ENV/
+
+# Logs & Debug
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+bun.lockb
+.DS_Store
+Thumbs.db
+
+# IDE & Editor files
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

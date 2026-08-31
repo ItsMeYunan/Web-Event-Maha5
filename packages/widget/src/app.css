@@ -1,0 +1,35 @@
+/* ==============================================================================
+   Global Styles for Discord Live Voting Svelte 5 Widget & Dashboard
+   ============================================================================== */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --bg-widget: transparent;
+  --bg-dashboard: #FFFFFF;
+  --text-primary: #000000;
+  --text-muted: #6B7280;
+  --bar-track: #E5E5E5;
+  --timer-ending: #DC2626;
+  --status-active: #10B981;
+}
+
+html, body {
+  width: 100%;
+  min-height: 100%;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Base App Layout */
+#app {
+  width: 100%;
+  min-height: 100vh;
+}
