@@ -3,6 +3,13 @@ import type { Candidate } from '../lib/types';
 import { isDarkColor } from '../lib/color';
 import { AvatarDisplay } from './AvatarDisplay';
 
+/**
+ * Fixed row height, so CandidateList can position rows by rank without
+ * measuring them. 82 = 50px avatar + 4px offset + 14px padding top and bottom
+ * (app.css sets box-sizing: border-box globally).
+ */
+export const CARD_HEIGHT = 82;
+
 interface CandidateCardProps {
   candidate: Candidate;
   isWinner?: boolean;
@@ -39,6 +46,7 @@ export const CandidateCard: React.FC<CandidateCardProps> = ({
         backgroundColor: candidate.colorHex,
         borderRadius: '18px',
         padding: '14px 18px',
+        height: CARD_HEIGHT,
         display: 'flex',
         alignItems: 'center',
         gap: '14px',
@@ -48,7 +56,7 @@ export const CandidateCard: React.FC<CandidateCardProps> = ({
           : '0 4px 14px rgba(0, 0, 0, 0.15)',
         overflow: 'hidden',
         userSelect: 'none',
-        transition: 'transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease',
+        transition: 'box-shadow 0.3s ease',
         border: isWinner ? '2px solid #F59E0B' : '1px solid rgba(255, 255, 255, 0.1)',
       }}
     >
