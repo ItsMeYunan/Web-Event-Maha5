@@ -1,4 +1,4 @@
-export type View = 'widget' | 'webui';
+export type View = 'widget' | 'webui' | 'dashboard';
 
 /**
  * Explicit route table: each URI owns its own handler. An unrecognised path
@@ -9,6 +9,7 @@ export type View = 'widget' | 'webui';
 const ROUTES: ReadonlyArray<[prefix: string, view: View]> = [
   ['/widget', 'widget'],
   ['/webui', 'webui'],
+  ['/dashboard', 'dashboard'],
 ];
 
 export function resolveView(pathname: string = window.location.pathname): View | null {

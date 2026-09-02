@@ -3,6 +3,7 @@ import React from 'react';
 import { CandidateList } from '../components/CandidateList';
 import { CARD_HEIGHT } from '../components/CandidateCard';
 import { resolveView } from '../lib/route';
+import { avatarUrl, displayName } from '../lib/auth';
 import type { Candidate } from '../lib/types';
 
 const c = (id: string, keyCode: string, name: string, votes: number): Candidate =>
@@ -41,16 +42,41 @@ const routeCases: ReadonlyArray<[string, ReturnType<typeof resolveView>]> = [
   ['/WIDGET', 'widget'],
   ['/webui', 'webui'],
   ['/webui/abc123', 'webui'],
+  ['/dashboard', 'dashboard'],
+  ['/dashboard/', 'dashboard'],
   ['/', null],
   ['', null],
   ['/nope', null],
   ['/widgetfoo', null],
   ['/webuixyz', null],
+  ['/dashboardxyz', null],
 ];
 for (const [path, expected] of routeCases) {
   const actual = resolveView(path);
   assert(actual === expected, `resolveView(${JSON.stringify(path)}) = ${actual}, expected ${expected}`);
 }
 console.log('routes checked   :', routeCases.length, 'paths, incl. unknown -> null');
+
+// --- Discord avatar + display name ---
+const withAvatar = { id: '80351110224678912', username: 'nelly', discriminator: '0',
+                     global_name: 'Nelly', avatar: '8342729096ea3675442027381ff50dfe' };
+const pomeloNoAvatar = { id: '80351110224678912', username: 'nelly', discriminator: '0',
+                         global_name: null, avatar: null };
+const legacyNoAvatar = { id: '80351110224678912', username: 'nelly', discriminator: '1337',
+                         avatar: null };
+
+assert(avatarUrl(withAvatar).startsWith(
+  'https://cdn.discordapp.com/avatars/80351110224678912/8342729096ea3675442027381ff50dfe.png'),
+  'custom avatar must use the avatars/<id>/<hash> CDN path');
+
+// snowflake >> 22 exceeds 32 bits, so this is only right if BigInt is used
+const expectedIndex = Number((BigInt('80351110224678912') >> 22n) % 6n);
+assert(avatarUrl(pomeloNoAvatar) === `https://cdn.discordapp.com/embed/avatars/${expectedIndex}.png`,
+  `pomelo default avatar index must be (id >> 22) % 6 = ${expectedIndex}`);
+assert(avatarUrl(legacyNoAvatar) === `https://cdn.discordapp.com/embed/avatars/${1337 % 5}.png`,
+  'legacy default avatar index must be discriminator % 5');
+assert(displayName(withAvatar) === 'Nelly', 'global_name wins over username');
+assert(displayName(pomeloNoAvatar) === 'nelly', 'username is the fallback when global_name is null');
+console.log('discord avatars :', 'pomelo index', expectedIndex, '| legacy index', 1337 % 5, '| ok');
 
 console.log('\nRENDER CHECK PASS');

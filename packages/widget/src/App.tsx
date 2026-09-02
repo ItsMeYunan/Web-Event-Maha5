@@ -4,6 +4,7 @@ import { resolveView } from './lib/route';
 import { LiveVotingWSClient } from './lib/ws';
 import { WidgetView, WidgetPending } from './views/WidgetView';
 import { WebUiView, WebUiPending } from './views/WebUiView';
+import { DashboardView } from './views/DashboardView';
 
 const HANDLERS = {
   widget: { View: WidgetView, Pending: WidgetPending },
@@ -66,6 +67,12 @@ export const App: React.FC = () => {
         <code>/webui</code> (dashboard).
       </main>
     );
+  }
+
+  // The dashboard renders with or without a live session, so it sits ahead of
+  // the session gate the two overlay handlers share.
+  if (view === 'dashboard') {
+    return <DashboardView session={session} isSessionEnded={isSessionEnded} />;
   }
 
   const { View, Pending } = HANDLERS[view];

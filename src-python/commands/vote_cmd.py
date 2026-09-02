@@ -178,6 +178,10 @@ class VoteCommands(commands.Cog):
             return
 
         session_id = res.get("sessionId")
+        # ponytail: session-less links, so only one vote per host can be shown at
+        # a time and a second concurrent session overwrites the first on screen.
+        # Send /webui/{session_id} and /widget/{session_id} once a backend serves
+        # per-session routes; the frontend route table already accepts them.
         webui_url = f"{self.config.server.base_url}/webui"
         widget_url = f"{self.config.server.base_url}/widget"
 

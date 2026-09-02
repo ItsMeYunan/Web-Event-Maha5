@@ -1,96 +1,209 @@
 # 🗳️ Discord Live Real-Time Voting & Stream Overlay
 
-> Platform voting langsung (*live interactive polling*) berlatensi ultra-rendah (< 100ms) untuk live streaming Discord Stage & OBS Studio dengan arsitektur hybrid.
+> Live voting untuk Discord Stage, dengan overlay OBS transparan dan dashboard web yang ter-update lewat WebSocket.
 
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue.svg)](https://www.typescriptlang.org/)
-[![Svelte](https://img.shields.io/badge/Svelte-5.0-orange.svg)](https://svelte.dev/)
 [![Python](https://img.shields.io/badge/Python-3.11+-green.svg)](https://www.python.org/)
-[![Vite](https://img.shields.io/badge/Vite-6.0+-purple.svg)](https://vitejs.dev/)
+[![React](https://img.shields.io/badge/React-18.3-blue.svg)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.6+-blue.svg)](https://www.typescriptlang.org/)
+[![Vite](https://img.shields.io/badge/Vite-5.4-purple.svg)](https://vitejs.dev/)
 
 ---
 
-## 🌟 Fitur Utama
+## 🌟 Fitur
 
-- ⚡ **Ultra-Low Latency WebSocket**: Broadcast perubahan suara ke seluruh layar dalam waktu `< 100ms`.
-- 🎙️ **Stage Channel Gated Validation**: Memastikan hanya penonton yang sedang aktif mendengarkan di Discord Stage yang dapat memberikan suara (Anti-Raider / Ghost Voter).
-- 📺 **Dual UI Output**:
-  - **Web UI Dashboard (`/webui/:sessionId`)**: Monitoring browser desktop dengan countdown timer besar 64px dan horizontal bar chart dinamis (*NeedMCP `data-dashboard`*).
-  - **OBS Stream Overlay (`/widget/:sessionId`)**: Widget transparan hemat resource OBS dengan avatar Discord voter terbaru dan vote count per kandidat (*NeedMCP `pet-care-dashboard`*).
-- 🎨 **Dynamic YAML Configuration**: Pengaturan warna kandidat, mode vote (one-time vs cooldown), dan durasi terpusat via `config.yaml`.
-- 🛡️ **Anti-Cheat & Deduplication**: Pelacakan User ID in-memory + database persistence.
+- 🎙️ **Stage channel gating** — hanya member yang berada di Stage/voice channel yang suaranya dihitung.
+- 🗳️ **Vote lewat chat** — peserta mengetik nomor kandidat (`1`, `2`, … `n`) di channel voting.
+- 📺 **OBS overlay** (`/widget`) — latar transparan, kartu kandidat dengan avatar voter terakhir.
+- 📊 **Web dashboard** (`/webui`) — countdown besar, kartu kandidat, total suara.
+- 🏆 **Rank animation** — kandidat yang menyalip berpindah posisi dengan animasi CSS murni (tanpa library animasi).
+- 🎨 **Konfigurasi YAML + `.env`** — warna kandidat, mode vote, durasi, dan gating.
 
 ---
 
-## 🏗️ Arsitektur Sistem
+## 🏗️ Arsitektur
 
 ```
-┌─────────────────┐       ┌────────────────────────┐       ┌────────────────────────┐
-│  Discord Chat   │ ───>  │  Python Bot Listener   │ ───>  │  Real-Time Backend     │
-│  (Type 1..N /   │       │  • Stage Gate Check    │       │  • In-Memory State     │
-│   Reaction)     │       │  • Command Parser      │       │  • WebSocket Hub       │
-└─────────────────┘       └────────────────────────┘       └───────────┬────────────┘
-                                                                       │
-                                              ┌────────────────────────┴────────────────────────┐
-                                              ▼                                                 ▼
-                                  ┌────────────────────────┐                        ┌────────────────────────┐
-                                  │  Web UI Dashboard      │                        │  OBS Svelte 5 Widget   │
-                                  │  • Barebone SSR/SPA    │                        │  • Transparent Alpha   │
-                                  │  • Monospace 64px Timer│                        │  • 48px Voter Avatars  │
-                                  │  • Horizontal Bars     │                        │  • Smooth Spring/Tween │
-                                  └────────────────────────┘                        └────────────────────────┘
+┌─────────────────┐      ┌────────────────────────┐      ┌────────────────────┐
+│  Discord Chat   │ ───> │  Python Bot            │ ───> │  Backend           │
+│  ketik 1..N     │      │  (src-python/)         │ HTTP │  (REST + WS hub)   │
+│                 │      │  • command handler     │      │                    │
+└─────────────────┘      │  • vote listener       │      └─────────┬──────────┘
+                         │  • stage gate          │                │ WebSocket
+                         └────────────────────────┘                ▼
+                                                     ┌────────────────────────┐
+                                                     │  packages/widget       │
+                                                     │  • /widget  (OBS)      │
+                                                     │  • /webui   (dashboard)│
+                                                     └────────────────────────┘
 ```
+
+> ⚠️ **Status:** backend REST/WebSocket belum ada di repository ini. Bot memanggil
+> `BunApiClient` (`src-python/services/api.py`) ke `server.base_url`, dan frontend
+> membuka socket ke `/ws/votes`. Keduanya membutuhkan service yang menyediakan
+> endpoint tersebut. Lihat [Status implementasi](#-status-implementasi).
 
 ---
 
-## 🚀 Panduan Memulai (*Quick Start*)
+## 🚀 Quick Start
 
 ### 1. Prasyarat
-- Node.js `>= 20.0` / Bun
 - Python `>= 3.11`
-- Discord Bot Token & Permission `Manage Channels`
+- Node.js `>= 20`
+- Discord bot token, dengan intent **Message Content** dan **Voice States** aktif
 
-### 2. Menjalankan Frontend Svelte 5 (Web UI & OBS Widget)
+### 2. Frontend
 ```bash
 cd packages/widget
 npm install
-npm run dev
+npm run dev          # http://localhost:5173/webui
 ```
-Buka `http://localhost:5173` di browser atau tambahkan sebagai **Browser Source** di OBS Studio.
 
-### 3. Konfigurasi (`config.yaml`)
-```yaml
-server:
-  host: localhost
-  port: 3000
-  ws_keepalive_seconds: 30
+Build produksi (menjalankan typecheck lebih dulu — type error menggagalkan build):
+```bash
+npm run build
+```
 
-voting:
-  mode: one_time             # one_time | cooldown
-  voice_gate_enabled: true   # Hanya yang berada di Stage Channel yang bisa vote
+### 3. Bot
+```bash
+cp .env.example .env         # isi DISCORD_BOT_TOKEN
+pip install -r src-python/requirements.txt
+python src-python/bot.py
+```
 
-candidates:
-  colors:
-    - "#06B6D4"              # Cyan
-    - "#FACC15"              # Yellow
-    - "#FB923C"              # Orange
-    - "#A855F7"              # Purple
+### 4. Mulai voting
+```
+!vote initiate #live-stage 5m Alpha Bravo Charlie
+!vote stop #live-stage       # kunci hasil
+!vote cancel #live-stage     # batalkan tanpa hasil
+!vote info                   # status konfigurasi
 ```
 
 ---
 
-## 📁 Struktur Monorepo
+## 🖥️ Halaman
+
+| URI | Untuk | Tampilan |
+|-----|-------|----------|
+| `/widget` | OBS Browser Source | Latar transparan, lebar 320px, pill status stage + kartu kandidat. Kosong total sebelum data masuk, agar overlay tidak menampilkan apa pun saat belum terhubung. |
+| `/webui` | Browser / monitoring | Latar terang, countdown monospace 64px, banner status gating, kartu kandidat, total suara. |
+| `/dashboard` | Panitia / admin | Login Discord OAuth2, lalu ringkasan sesi: status, total suara, jumlah kandidat, gating, dan perolehan per kandidat. |
+
+URI lain menghasilkan halaman "tidak ditemukan" — dashboard bukan lagi fallback
+untuk sembarang path. Pencocokan dilakukan per segmen, sehingga
+`/webui/<sessionId>` ikut dikenali (siap dipakai saat backend menyediakan rute
+per-sesi), sedangkan `/webuixyz` tidak.
+
+---
+
+## ⚙️ Konfigurasi
+
+`config.yaml` menyimpan default, `.env` menimpanya (lihat `.env.example`).
+
+```yaml
+server:
+  base_url: "http://localhost:3000"   # dipakai untuk membangun link di embed
+
+discord:
+  command_prefix: "!vote"
+  admin_role_ids: [112233445566778899]
+  target_stage_channel_id: 123456789012345678
+  voice_gate_enabled: true
+
+voting:
+  vote_mode: "ONE_TIME"        # ONE_TIME | COOLDOWN
+  cooldown_seconds: 15
+  candidate_colors: ["#06B6D4", "#FACC15", "#FB923C", "#A855F7"]
+```
+
+> 🔐 `config.yaml` ikut ter-commit. Jangan menaruh token atau secret di sini —
+> gunakan `.env`.
+
+### Login dashboard (Discord OAuth2)
+
+`/dashboard` memakai **implicit grant**, jadi tidak ada client secret di frontend.
+
+1. Discord Developer Portal → aplikasi Anda → **OAuth2**.
+2. Tambahkan Redirect URI: `http://localhost:5173/dashboard` (dev) dan
+   `<base_url>/dashboard` (produksi). Harus sama persis.
+3. Isi `VITE_DISCORD_CLIENT_ID` di `.env` (root repo — Vite membacanya lewat
+   `envDir`). Hanya variabel berawalan `VITE_` yang sampai ke browser.
+
+Scope yang diminta hanya `identify` (nama + avatar). Token disimpan di
+`sessionStorage`, hilang saat tab ditutup, dan dihapus dari address bar begitu
+diterima.
+
+> ⚠️ Login membuktikan **identitas**, bukan **wewenang**. Semua akun Discord bisa
+> masuk dan membaca halaman ini. Pembatasan berdasarkan role hanya bisa
+> dipaksakan oleh backend.
+
+---
+
+## 📁 Struktur
 
 ```
 .
-├── config.yaml               # Konfigurasi sistem terpusat
-├── packages/
-│   ├── backend/              # WebSocket hub & REST API
-│   └── widget/               # Frontend Svelte 5 (OBS Overlay & Web Dashboard)
-├── src-python/               # Discord Bot listener & command handler
-└── README.md
+├── config.yaml
+├── src-python/
+│   ├── bot.py                  # entrypoint, gateway orchestrator
+│   ├── config.py               # config.yaml + .env
+│   ├── commands/vote_cmd.py    # !vote initiate | stop | cancel | info
+│   ├── listeners/              # vote lewat chat & reaction
+│   ├── services/               # api client, stage gate, timer
+│   └── utils/                  # durasi, permission
+├── packages/widget/            # React 18 + Vite 5
+│   ├── src/App.tsx             # dispatcher: URI -> handler
+│   ├── src/lib/route.ts        # tabel rute
+│   ├── src/lib/ws.ts           # WebSocket client + reconnect
+│   ├── src/lib/auth.ts         # Discord OAuth2 (implicit grant)
+│   ├── src/views/              # WidgetView, WebUiView, DashboardView, LoginView
+│   ├── src/components/         # kartu, list, avatar, indikator
+│   └── src/__check__/          # render check (tanpa test framework)
+└── tests/                      # pytest untuk bot
 ```
+
+---
+
+## 🧪 Verifikasi
+
+```bash
+# frontend
+cd packages/widget
+npm run typecheck   # src/ + vite.config.ts
+npm run check       # render + routing check
+npm run build
+
+# bot
+pip install pytest && python -m pytest tests/ -q
+```
+
+`npm run check` merender daftar kandidat lalu memastikan urutan rank, offset
+`translateY`, tinggi container, dan 11 kasus routing — gagal dengan exit code
+non-nol bila logikanya rusak.
+
+### Standar TypeScript
+
+`tsconfig.json` mengaktifkan `strict`, `noUncheckedIndexedAccess`,
+`exactOptionalPropertyTypes`, `noUnusedLocals`, dan `noUnusedParameters`.
+`vite.config.ts` diperiksa lewat `tsconfig.node.json`. `npm run build`
+menjalankan typecheck lebih dulu, jadi type error tidak akan ikut ter-build.
+
+---
+
+## 📌 Status implementasi
+
+| Bagian | Status |
+|--------|--------|
+| Bot: `!vote initiate` / `stop` / `cancel` / `info` | ✅ |
+| Vote lewat chat & reaction, stage gating | ✅ |
+| Frontend `/widget` dan `/webui` | ✅ |
+| Dashboard `/dashboard` + login Discord | ✅ frontend |
+| Token exchange OAuth2 (authorization code) | ❌ butuh backend — lihat debt |
+| Pembatasan dashboard berdasarkan role | ❌ butuh backend |
+| Backend REST + WebSocket hub | ❌ belum ada di repo |
+| Rute per-sesi (`/webui/<id>`) | ⏳ frontend siap, bot masih mengirim link tanpa session id |
+| Slash command (`/vote`) | ❌ |
 
 ---
 
 ## 📄 Lisensi
-Distributed under the MIT License.
+MIT.
