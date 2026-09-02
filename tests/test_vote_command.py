@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
@@ -241,3 +242,31 @@ async def test_stage_falls_back_to_the_admins_voice_channel(setup):
     await vote_cog.initiate.callback(vote_cog, ctx, channel, "5m", "Alpha", "Bravo")
 
     assert vote_cog.session_meta["sess_test_100"]["stage_channel_id"] == 777
+
+
+@pytest.mark.asyncio
+async def test_expiry_finalises_even_when_the_backend_awaits(setup):
+    """The timer calls _close from inside its own task. Uses a real await point
+    because AsyncMock never suspends and so would hide a self-cancel."""
+    vote_cog = setup["vote_cog"]
+    register(vote_cog)
+    completed = {"stop": False}
+
+    async def slow_stop(session_id):
+        await asyncio.sleep(0.05)          # real suspension, like real HTTP
+        completed["stop"] = True
+        return {}
+
+    vote_cog.api.stop_session = slow_stop
+    channel = MagicMock(id=5555, mention="<#5555>")
+    channel.send = AsyncMock()
+
+    async def on_expire(session_id):
+        await vote_cog._handle_auto_stop(session_id, channel)
+
+    vote_cog.timer_mgr.start_timer("sess_test_100", 1, on_expire=on_expire)
+    await asyncio.sleep(1.4)
+
+    assert completed["stop"] is True, "backend never told the session ended"
+    assert channel.send.called, "final results were never posted"
+    assert 5555 not in vote_cog.active_sessions
