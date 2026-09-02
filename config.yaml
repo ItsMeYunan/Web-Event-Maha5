@@ -10,7 +10,9 @@ server:
 
 discord:
   command_prefix: "!vote"
-  admin_role_ids:
+  # Siapa yang boleh menjalankan !vote. Cukup salah satu terpenuhi.
+  min_role_id: 112233445566778899   # semua role di atas/sejajar role ini boleh
+  admin_role_ids:                   # daftar role tambahan (opsional)
     - 112233445566778899
   # Kosongkan untuk memakai stage channel tempat admin berada saat initiate
   target_stage_channel_id: 123456789012345678

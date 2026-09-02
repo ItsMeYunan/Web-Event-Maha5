@@ -21,7 +21,11 @@ HELP_COMMANDS = (
      "Menghentikan sesi voting yang sedang berjalan dan mengunci hasil akhir."),
     ("`!vote cancel <#channel>`",
      "Membatalkan sesi voting tanpa menyimpan hasil."),
+    ("`!vote info`",
+     "Menampilkan konfigurasi bot dan sesi yang sedang berjalan."),
 )
+
+DENIED = "❌ **Akses Ditolak:** Anda tidak memiliki izin untuk menjalankan perintah ini."
 
 class VoteCommands(commands.Cog):
     def __init__(
@@ -40,6 +44,10 @@ class VoteCommands(commands.Cog):
         # Mapping: session_id -> metadata dict
         self.session_meta: Dict[str, Dict[str, Any]] = {}
 
+    def _is_admin(self, member) -> bool:
+        discord_cfg = self.config.discord
+        return is_voting_admin(member, discord_cfg.admin_role_ids, discord_cfg.min_role_id)
+
     @commands.group(name="vote", invoke_without_command=True)
     async def vote_group(self, ctx: commands.Context):
         """Root command: !vote"""
@@ -50,6 +58,44 @@ class VoteCommands(commands.Cog):
         )
         for name, value in HELP_COMMANDS:
             embed.add_field(name=name, value=value, inline=False)
+        await ctx.reply(embed=embed)
+
+    @vote_group.command(name="info")
+    async def info(self, ctx: commands.Context):
+        """!vote info - current configuration and running sessions. Admins only:
+        it exposes the backend target and the gating setup."""
+        if not self._is_admin(ctx.author):
+            await ctx.reply(DENIED)
+            return
+
+        discord_cfg = self.config.discord
+        voting_cfg = self.config.voting
+
+        min_role = ctx.guild.get_role(discord_cfg.min_role_id) if (
+            ctx.guild and discord_cfg.min_role_id) else None
+        allow_list = ", ".join(f"<@&{rid}>" for rid in discord_cfg.admin_role_ids) or "—"
+
+        embed = discord.Embed(title="⚙️ Status Konfigurasi Bot Voting", color=0x10B981)
+        embed.add_field(name="🌐 Backend", value=f"`{self.config.server.base_url}`", inline=True)
+        # never render key material, not even a suffix
+        embed.add_field(name="🔑 Admin Key",
+                        value="✅ Tersimpan" if self.config.server.admin_key else "❌ Belum diatur",
+                        inline=True)
+        embed.add_field(name="💬 Prefix", value=f"`{discord_cfg.command_prefix}`", inline=True)
+        embed.add_field(
+            name="🎙️ Voice Gating",
+            value=("✅ Aktif — hanya member di stage channel sesi"
+                   if discord_cfg.voice_gate_enabled else "❌ Non-aktif (terbuka untuk semua)"),
+            inline=False,
+        )
+        embed.add_field(name="🛡️ Role Minimum",
+                        value=min_role.mention if min_role else "— (tidak diatur)", inline=True)
+        embed.add_field(name="📋 Role Tambahan", value=allow_list, inline=True)
+        embed.add_field(name="🗳️ Mode", value=f"`{voting_cfg.vote_mode}`", inline=True)
+        embed.add_field(name="📊 Sesi Aktif",
+                        value=f"{len(self.active_sessions)} sesi berjalan", inline=True)
+        if ctx.guild:
+            embed.set_footer(text=f"Guild: {ctx.guild.name} ({ctx.guild.id})")
         await ctx.reply(embed=embed)
 
     @vote_group.command(name="initiate")
@@ -74,8 +120,8 @@ class VoteCommands(commands.Cog):
         # Default to the channel the command was sent in.
         channel = channel or ctx.channel
 
-        if not is_voting_admin(ctx.author, self.config.discord.admin_role_ids):
-            await ctx.reply("❌ **Akses Ditolak:** Anda membutuhkan izin `Administrator` / `Manage Channels` untuk memulai voting.", ephemeral=True)
+        if not self._is_admin(ctx.author):
+            await ctx.reply(DENIED)
             return
 
         if channel.id in self.active_sessions:
@@ -243,8 +289,8 @@ class VoteCommands(commands.Cog):
     async def _end_session(self, ctx: commands.Context, channel: discord.TextChannel,
                            finalize, announcement, reply: str):
         """Admin-invoked close: permission check, then the shared teardown."""
-        if not is_voting_admin(ctx.author, self.config.discord.admin_role_ids):
-            await ctx.reply("❌ **Akses Ditolak:** Anda tidak memiliki izin untuk ini.")
+        if not self._is_admin(ctx.author):
+            await ctx.reply(DENIED)
             return
 
         session_id = self.active_sessions.get(channel.id)

@@ -270,3 +270,39 @@ async def test_expiry_finalises_even_when_the_backend_awaits(setup):
     assert completed["stop"] is True, "backend never told the session ended"
     assert channel.send.called, "final results were never posted"
     assert 5555 not in vote_cog.active_sessions
+
+
+@pytest.mark.asyncio
+async def test_info_is_refused_for_non_admins(setup):
+    vote_cog = setup["vote_cog"]
+    ctx = MagicMock()
+    ctx.author.id = 2
+    ctx.guild.owner_id = 1
+    ctx.author.guild_permissions.administrator = False
+    ctx.author.guild_permissions.manage_channels = False
+    ctx.author.guild_permissions.manage_guild = False
+    ctx.author.roles = []
+    ctx.author.top_role = None
+    ctx.reply = AsyncMock()
+
+    await vote_cog.info.callback(vote_cog, ctx)
+
+    reply = ctx.reply.await_args.args[0]
+    assert "Akses Ditolak" in reply
+    assert ctx.reply.await_args.kwargs.get("embed") is None
+
+
+@pytest.mark.asyncio
+async def test_info_never_renders_key_material(setup):
+    vote_cog = setup["vote_cog"]
+    vote_cog.config.server.admin_key = "super-secret-value"
+    ctx = admin_ctx()
+    ctx.guild.name = "Guild"
+
+    await vote_cog.info.callback(vote_cog, ctx)
+
+    embed = ctx.reply.await_args.kwargs["embed"]
+    rendered = " ".join(f"{f.name} {f.value}" for f in embed.fields)
+    assert "super-secret-value" not in rendered
+    assert "secret" not in rendered.lower()
+    assert "Tersimpan" in rendered            # presence only, never the value

@@ -28,7 +28,8 @@ class DiscordConfig(BaseModel):
     client_id: Optional[str] = None   # OAuth2 app id - dashboard login
     client_secret: str = ""           # env-only; required for the token exchange
     command_prefix: str = "!vote"
-    admin_role_ids: List[int] = Field(default_factory=list)
+    admin_role_ids: List[int] = Field(default_factory=list)   # explicit allow-list
+    min_role_id: Optional[int] = None   # anyone ranked at/above this role qualifies
     target_stage_channel_id: Optional[int] = None   # pins the stage; else auto-detected
     voice_gate_enabled: bool = False
 
@@ -64,6 +65,7 @@ ENV_OVERRIDES = {
     "DISCORD_CLIENT_ID": ("discord", "client_id", str),
     "DISCORD_CLIENT_SECRET": ("discord", "client_secret", str),
     "COMMAND_PREFIX": ("discord", "command_prefix", str),
+    "DISCORD_MIN_ROLE_ID": ("discord", "min_role_id", int),
     "DISCORD_STAGE_CHANNEL_ID": ("discord", "target_stage_channel_id", int),
     "DISCORD_VOICE_GATE_ENABLED": ("discord", "voice_gate_enabled", _bool),
     "BACKEND_URL": ("server", "base_url", str),
