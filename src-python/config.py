@@ -1,116 +1,88 @@
+"""Configuration: config.yaml, overridden by environment variables.
+
+Pydantic v2 ignores undeclared keys by default, so anything in config.yaml
+without a field below is silently dropped rather than rejected.
 """
-Dynamic Configuration Loader for Discord Live Voting Bot
-Reads config.yaml and overrides with environment variables (.env) seamlessly.
-"""
-from pathlib import Path
 import os
-import yaml
-from pydantic import BaseModel, Field
+from pathlib import Path
 from typing import List, Optional
+
+import yaml
 from dotenv import load_dotenv
+from pydantic import BaseModel, Field
 
 load_dotenv()
 
+CONFIG_PATH = Path(__file__).parent.parent / "config.yaml"
+
+
 class ServerConfig(BaseModel):
-    host: str = "0.0.0.0"
+    host: str = "0.0.0.0"        # bind address for the dashboard/web server
     port: int = 3000
-    base_url: str = "http://localhost:3000"
-    admin_key: str = "maha5_live_secret_key_2026"
+    base_url: str = "http://localhost:3000"   # public origin; OAuth redirect is <base_url>/dashboard
+    admin_key: str = ""          # set via BACKEND_ADMIN_KEY, never committed
+
 
 class DiscordConfig(BaseModel):
     bot_token: Optional[str] = None
-    client_id: Optional[str] = None
+    client_id: Optional[str] = None   # OAuth2 app id - dashboard login
+    client_secret: str = ""           # env-only; required for the token exchange
     command_prefix: str = "!vote"
     admin_role_ids: List[int] = Field(default_factory=list)
-    target_guild_id: Optional[int] = None
-    target_stage_channel_id: Optional[int] = None
+    target_stage_channel_id: Optional[int] = None   # pins the stage; else auto-detected
     voice_gate_enabled: bool = False
 
+
 class VotingConfig(BaseModel):
-    default_duration_seconds: int = 300
-    min_duration_seconds: int = 5
-    max_duration_seconds: int = 7200
-    vote_mode: str = "ONE_TIME"
+    min_duration_seconds: int = 10
+    max_duration_seconds: int = 3600
+    vote_mode: str = "ONE_TIME"          # ONE_TIME | COOLDOWN
     cooldown_seconds: int = 15
     candidate_colors: List[str] = Field(
-        default_factory=lambda: ["#06B6D4", "#FACC15", "#FB923C", "#A855F7", "#10B981", "#EC4899", "#3B82F6"]
+        default_factory=lambda: ["#06B6D4", "#FACC15", "#FB923C", "#A855F7",
+                                 "#10B981", "#EC4899", "#3B82F6", "#84CC16"]
     )
+
 
 class AppConfig(BaseModel):
     server: ServerConfig = Field(default_factory=ServerConfig)
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
     voting: VotingConfig = Field(default_factory=VotingConfig)
 
+
+def _bool(value: str) -> bool:
+    return value.strip().lower() in ("true", "1", "yes", "on")
+
+
+def _colors(value: str) -> List[str]:
+    return [c.strip() for c in value.split(",") if c.strip()]
+
+
+# env var -> (config section, field, parser)
+ENV_OVERRIDES = {
+    "DISCORD_BOT_TOKEN": ("discord", "bot_token", str),
+    "DISCORD_CLIENT_ID": ("discord", "client_id", str),
+    "DISCORD_CLIENT_SECRET": ("discord", "client_secret", str),
+    "COMMAND_PREFIX": ("discord", "command_prefix", str),
+    "DISCORD_STAGE_CHANNEL_ID": ("discord", "target_stage_channel_id", int),
+    "DISCORD_VOICE_GATE_ENABLED": ("discord", "voice_gate_enabled", _bool),
+    "BACKEND_URL": ("server", "base_url", str),
+    "HOST": ("server", "host", str),
+    "PORT": ("server", "port", int),
+    "BACKEND_ADMIN_KEY": ("server", "admin_key", str),
+    "VOTE_MODE": ("voting", "vote_mode", str.upper),
+    "COOLDOWN_SECONDS": ("voting", "cooldown_seconds", int),
+    "CANDIDATE_COLORS": ("voting", "candidate_colors", _colors),
+}
+
+
 def load_config(config_path: Optional[str] = None) -> AppConfig:
-    """Load configuration from config.yaml with full environment variable overrides."""
-    data = {}
+    path = Path(config_path) if config_path else CONFIG_PATH
+    data = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}) if path.exists() else {}
 
-    if not config_path:
-        possible_paths = [
-            Path.cwd() / "config.yaml",
-            Path(__file__).parent.parent / "config.yaml",
-            Path(__file__).parent / "config.yaml",
-        ]
-        for p in possible_paths:
-            if p.exists():
-                config_path = str(p)
-                break
-
-    if config_path and Path(config_path).exists():
-        with open(config_path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-
-    # Initialize sub-dictionaries if missing
-    if "server" not in data: data["server"] = {}
-    if "discord" not in data: data["discord"] = {}
-    if "voting" not in data: data["voting"] = {}
-
-    # 1. Environment Variable Overrides for Server
-    if os.getenv("BACKEND_ADMIN_KEY") or os.getenv("ADMIN_KEY") or os.getenv("SECRET_KEY"):
-        data["server"]["admin_key"] = os.getenv("BACKEND_ADMIN_KEY") or os.getenv("ADMIN_KEY") or os.getenv("SECRET_KEY")
-
-    if os.getenv("BACKEND_URL") or os.getenv("BASE_URL"):
-        data["server"]["base_url"] = os.getenv("BACKEND_URL") or os.getenv("BASE_URL")
-
-    # 2. Environment Variable Overrides for Discord
-    if os.getenv("DISCORD_BOT_TOKEN") or os.getenv("BOT_TOKEN"):
-        data["discord"]["bot_token"] = os.getenv("DISCORD_BOT_TOKEN") or os.getenv("BOT_TOKEN")
-
-    if os.getenv("DISCORD_CLIENT_ID"):
-        data["discord"]["client_id"] = os.getenv("DISCORD_CLIENT_ID")
-
-    if os.getenv("COMMAND_PREFIX"):
-        data["discord"]["command_prefix"] = os.getenv("COMMAND_PREFIX")
-
-    if os.getenv("DISCORD_GUILD_ID"):
-        try:
-            data["discord"]["target_guild_id"] = int(os.getenv("DISCORD_GUILD_ID"))
-        except ValueError:
-            pass
-
-    if os.getenv("DISCORD_STAGE_CHANNEL_ID"):
-        try:
-            data["discord"]["target_stage_channel_id"] = int(os.getenv("DISCORD_STAGE_CHANNEL_ID"))
-        except ValueError:
-            pass
-
-    if os.getenv("DISCORD_VOICE_GATE_ENABLED") is not None or os.getenv("VOICE_GATE_ENABLED") is not None:
-        val = (os.getenv("DISCORD_VOICE_GATE_ENABLED") or os.getenv("VOICE_GATE_ENABLED") or "").strip().lower()
-        data["discord"]["voice_gate_enabled"] = val in ["true", "1", "yes", "on"]
-
-    # 3. Environment Variable Overrides for Voting
-    if os.getenv("VOTE_MODE"):
-        data["voting"]["vote_mode"] = os.getenv("VOTE_MODE").upper()
-
-    if os.getenv("COOLDOWN_SECONDS"):
-        try:
-            data["voting"]["cooldown_seconds"] = int(os.getenv("COOLDOWN_SECONDS"))
-        except ValueError:
-            pass
-
-    if os.getenv("CANDIDATE_COLORS"):
-        colors = [c.strip() for c in os.getenv("CANDIDATE_COLORS").split(",") if c.strip()]
-        if colors:
-            data["voting"]["candidate_colors"] = colors
+    for env_var, (section, field, parse) in ENV_OVERRIDES.items():
+        raw = os.getenv(env_var)
+        if raw:
+            data.setdefault(section, {})[field] = parse(raw)
 
     return AppConfig(**data)
