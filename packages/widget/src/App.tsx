@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { SessionData } from './lib/types';
 import { resolveView } from './lib/route';
 import { LiveVotingWSClient } from './lib/ws';
 import { WidgetView, WidgetPending } from './views/WidgetView';
 import { WebUiView, WebUiPending } from './views/WebUiView';
 import { DashboardView } from './views/DashboardView';
+import { loadSettings, recordSession } from './lib/store';
 
 const HANDLERS = {
   widget: { View: WidgetView, Pending: WidgetPending },
@@ -17,6 +18,9 @@ const view = resolveView();
 export const App: React.FC = () => {
   const [session, setSession] = useState<SessionData | null>(null);
   const [isSessionEnded, setIsSessionEnded] = useState(false);
+  // sessionId/title are fixed for a session, so a ref is enough to record the
+  // result without reading state inside the SESSION_END handler.
+  const meta = useRef<{ sessionId: string; title: string } | null>(null);
 
   useEffect(() => {
     if (!view) return;
@@ -25,6 +29,7 @@ export const App: React.FC = () => {
 
     // Handlers first, then connect: nothing can arrive before they exist.
     client.onInit = (initData) => {
+      meta.current = { sessionId: initData.sessionId, title: initData.title };
       setSession(initData);
       setIsSessionEnded(initData.status === 'CLOSED');
     };
@@ -38,6 +43,10 @@ export const App: React.FC = () => {
     };
 
     client.onSessionEnd = (_reason, finalResults) => {
+      // recordSession replaces by sessionId, so a replayed SESSION_END is a no-op.
+      if (meta.current && loadSettings().keepHistory) {
+        recordSession(meta.current, finalResults);
+      }
       setSession((prev) =>
         prev
           ? {

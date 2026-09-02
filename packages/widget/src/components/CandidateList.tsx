@@ -6,6 +6,8 @@ interface CandidateListProps {
   candidates: Candidate[];
   isSessionEnded?: boolean;
   gap?: number;
+  sortByRank?: boolean;
+  showPercentage?: boolean;
 }
 
 /**
@@ -21,12 +23,13 @@ export const CandidateList: React.FC<CandidateListProps> = ({
   candidates,
   isSessionEnded = false,
   gap = 8,
+  sortByRank = true,
+  showPercentage = true,
 }) => {
-  const rankByKey = new Map(
-    [...candidates]
-      .sort((a, b) => b.votes - a.votes)
-      .map((candidate, index) => [candidate.keyCode, index])
-  );
+  const ordered = sortByRank
+    ? [...candidates].sort((a, b) => b.votes - a.votes)
+    : candidates;
+  const rankByKey = new Map(ordered.map((candidate, index) => [candidate.keyCode, index]));
   const maxVotes = Math.max(0, ...candidates.map((c) => c.votes));
 
   return (
@@ -54,6 +57,7 @@ export const CandidateList: React.FC<CandidateListProps> = ({
             <CandidateCard
               candidate={candidate}
               rank={rank + 1}
+              showPercentage={showPercentage}
               isWinner={isSessionEnded && candidate.votes === maxVotes && maxVotes > 0}
             />
           </div>

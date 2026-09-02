@@ -14,12 +14,14 @@ interface CandidateCardProps {
   candidate: Candidate;
   isWinner?: boolean;
   rank?: number;
+  showPercentage?: boolean;
 }
 
 export const CandidateCard: React.FC<CandidateCardProps> = ({
   candidate,
   isWinner = false,
   rank,
+  showPercentage = true,
 }) => {
   const [isPulsing, setIsPulsing] = useState(false);
   const prevVotesRef = useRef(candidate.votes);
@@ -194,17 +196,19 @@ export const CandidateCard: React.FC<CandidateCardProps> = ({
         >
           {candidate.votes}
         </div>
-        <div
-          style={{
-            fontSize: '11px',
-            fontWeight: 800,
-            fontFamily: 'var(--font-mono)',
-            color: subtextColor,
-            marginTop: '2px',
-          }}
-        >
-          {candidate.percentage}%
-        </div>
+        {showPercentage && (
+          <div
+            style={{
+              fontSize: '11px',
+              fontWeight: 800,
+              fontFamily: 'var(--font-mono)',
+              color: subtextColor,
+              marginTop: '2px',
+            }}
+          >
+            {candidate.percentage}%
+          </div>
+        )}
       </div>
     </div>
   );
