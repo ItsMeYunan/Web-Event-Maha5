@@ -53,6 +53,21 @@ def voter(user_id, voice_channel_id=None):
     return msg
 
 
+def non_admin_ctx():
+    """A member with no owner status, no permissions, no roles."""
+    ctx = MagicMock()
+    ctx.author.id = 2
+    ctx.guild.owner_id = 1
+    ctx.author.guild_permissions.administrator = False
+    ctx.author.guild_permissions.manage_channels = False
+    ctx.author.guild_permissions.manage_guild = False
+    ctx.author.roles = []
+    ctx.author.top_role = None
+    ctx.guild.get_role = lambda _: None
+    ctx.reply = AsyncMock()
+    return ctx
+
+
 def admin_ctx(stage_id=12345):
     ctx = MagicMock()
     ctx.author.id = 1
@@ -157,14 +172,7 @@ async def test_non_admin_cannot_stop(setup):
     vote_cog, api = setup["vote_cog"], setup["api"]
     register(vote_cog)
 
-    ctx = MagicMock()
-    ctx.author.id = 2
-    ctx.guild.owner_id = 1                     # not the owner
-    ctx.author.guild_permissions.administrator = False
-    ctx.author.guild_permissions.manage_channels = False
-    ctx.author.guild_permissions.manage_guild = False
-    ctx.author.roles = []
-    ctx.reply = AsyncMock()
+    ctx = non_admin_ctx()
     channel = MagicMock(id=5555, mention="<#5555>")
     channel.send = AsyncMock()
 
@@ -275,15 +283,7 @@ async def test_expiry_finalises_even_when_the_backend_awaits(setup):
 @pytest.mark.asyncio
 async def test_info_is_refused_for_non_admins(setup):
     vote_cog = setup["vote_cog"]
-    ctx = MagicMock()
-    ctx.author.id = 2
-    ctx.guild.owner_id = 1
-    ctx.author.guild_permissions.administrator = False
-    ctx.author.guild_permissions.manage_channels = False
-    ctx.author.guild_permissions.manage_guild = False
-    ctx.author.roles = []
-    ctx.author.top_role = None
-    ctx.reply = AsyncMock()
+    ctx = non_admin_ctx()
 
     await vote_cog.info.callback(vote_cog, ctx)
 
