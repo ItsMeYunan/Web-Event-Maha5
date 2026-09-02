@@ -1,17 +1,25 @@
 import React, { useEffect, useState } from 'react';
 import type { SessionData } from './lib/types';
+import { resolveView } from './lib/route';
 import { LiveVotingWSClient } from './lib/ws';
-import { WidgetOverlay } from './components/WidgetOverlay';
-import { DashboardOverlay } from './components/DashboardOverlay';
+import { WidgetView, WidgetPending } from './views/WidgetView';
+import { WebUiView, WebUiPending } from './views/WebUiView';
 
-// /widget -> transparent OBS browser source. Anything else -> the dashboard.
-const isWidgetRoute = window.location.pathname.toLowerCase().startsWith('/widget');
+const HANDLERS = {
+  widget: { View: WidgetView, Pending: WidgetPending },
+  webui: { View: WebUiView, Pending: WebUiPending },
+} as const;
 
+const view = resolveView();
+
+/** Dispatches the current URI to its handler and feeds it the live session. */
 export const App: React.FC = () => {
   const [session, setSession] = useState<SessionData | null>(null);
   const [isSessionEnded, setIsSessionEnded] = useState(false);
 
   useEffect(() => {
+    if (!view) return;
+
     const client = new LiveVotingWSClient();
 
     // Handlers first, then connect: nothing can arrive before they exist.
@@ -51,47 +59,15 @@ export const App: React.FC = () => {
     };
   }, []);
 
-  // Until the server sends INIT there is no session to draw. The overlay stays
-  // fully transparent so an unconnected OBS source shows nothing at all.
-  if (!session) {
-    return isWidgetRoute ? null : (
-      <main style={{ padding: '32px', color: '#64748B', fontSize: '14px' }}>
-        Menghubungkan ke sesi voting…
-      </main>
-    );
-  }
-
-  if (isWidgetRoute) {
+  if (!view) {
     return (
-      <main style={{ width: '100vw', minHeight: '100vh', background: 'transparent' }}>
-        <WidgetOverlay session={session} isSessionEnded={isSessionEnded} />
+      <main style={{ padding: '32px', color: '#64748B', fontSize: '14px' }}>
+        Halaman tidak ditemukan. Gunakan <code>/widget</code> (OBS overlay) atau{' '}
+        <code>/webui</code> (dashboard).
       </main>
     );
   }
 
-  return (
-    <main
-      style={{
-        minHeight: '100vh',
-        backgroundColor: '#F8FAFC',
-        color: '#0F172A',
-        padding: '32px 16px',
-        display: 'flex',
-        justifyContent: 'center',
-      }}
-    >
-      <div
-        style={{
-          width: '100%',
-          maxWidth: '800px',
-          backgroundColor: '#FFFFFF',
-          borderRadius: '16px',
-          boxShadow: '0 4px 20px rgba(0, 0, 0, 0.06)',
-          overflow: 'hidden',
-        }}
-      >
-        <DashboardOverlay session={session} isSessionEnded={isSessionEnded} />
-      </div>
-    </main>
-  );
+  const { View, Pending } = HANDLERS[view];
+  return session ? <View session={session} isSessionEnded={isSessionEnded} /> : <Pending />;
 };
