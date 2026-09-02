@@ -7,7 +7,10 @@ UNIT_SECONDS = {"": 1, "s": 1, "m": 60, "h": 3600}
 
 def parse_duration(duration_str: str) -> int:
     """Parse a duration into seconds. Raises ValueError on anything else."""
-    match = DURATION.match((duration_str or "").strip().lower())
+    # isinstance guard: a non-str would otherwise raise AttributeError, and the
+    # caller only catches ValueError.
+    text = duration_str.strip().lower() if isinstance(duration_str, str) else ""
+    match = DURATION.match(text)
     if not match:
         raise ValueError(
             f"Invalid duration format: '{duration_str}'. Use '30s', '5m', or '1h'."
