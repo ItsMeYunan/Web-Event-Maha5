@@ -2,7 +2,7 @@ import React from 'react';
 
 interface StageIndicatorProps {
   isStageGated?: boolean;
-  stageName?: string;
+  stageName?: string | undefined;
   isSessionEnded?: boolean;
 }
 
