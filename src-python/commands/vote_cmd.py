@@ -75,25 +75,24 @@ class VoteCommands(commands.Cog):
             ctx.guild and discord_cfg.min_role_id) else None
         allow_list = ", ".join(f"<@&{rid}>" for rid in discord_cfg.admin_role_ids) or "—"
 
-        embed = discord.Embed(title="⚙️ Status Konfigurasi Bot Voting", color=0x10B981)
-        embed.add_field(name="🌐 Backend", value=f"`{self.config.server.base_url}`", inline=True)
-        # never render key material, not even a suffix
-        embed.add_field(name="🔑 Admin Key",
-                        value="✅ Tersimpan" if self.config.server.admin_key else "❌ Belum diatur",
-                        inline=True)
-        embed.add_field(name="💬 Prefix", value=f"`{discord_cfg.command_prefix}`", inline=True)
-        embed.add_field(
-            name="🎙️ Voice Gating",
-            value=("✅ Aktif — hanya member di stage channel sesi"
-                   if discord_cfg.voice_gate_enabled else "❌ Non-aktif (terbuka untuk semua)"),
-            inline=False,
+        fields = (
+            ("🌐 Backend", f"`{self.config.server.base_url}`", True),
+            # presence only - never render key material, not even a suffix
+            ("🔑 Admin Key",
+             "✅ Tersimpan" if self.config.server.admin_key else "❌ Belum diatur", True),
+            ("💬 Prefix", f"`{discord_cfg.command_prefix}`", True),
+            ("🎙️ Voice Gating",
+             "✅ Aktif — hanya member di stage channel sesi"
+             if discord_cfg.voice_gate_enabled else "❌ Non-aktif (terbuka untuk semua)", False),
+            ("🛡️ Role Minimum", min_role.mention if min_role else "— (tidak diatur)", True),
+            ("📋 Role Tambahan", allow_list, True),
+            ("🗳️ Mode", f"`{voting_cfg.vote_mode}`", True),
+            ("📊 Sesi Aktif", f"{len(self.active_sessions)} sesi berjalan", True),
         )
-        embed.add_field(name="🛡️ Role Minimum",
-                        value=min_role.mention if min_role else "— (tidak diatur)", inline=True)
-        embed.add_field(name="📋 Role Tambahan", value=allow_list, inline=True)
-        embed.add_field(name="🗳️ Mode", value=f"`{voting_cfg.vote_mode}`", inline=True)
-        embed.add_field(name="📊 Sesi Aktif",
-                        value=f"{len(self.active_sessions)} sesi berjalan", inline=True)
+
+        embed = discord.Embed(title="⚙️ Status Konfigurasi Bot Voting", color=0x10B981)
+        for name, value, inline in fields:
+            embed.add_field(name=name, value=value, inline=inline)
         if ctx.guild:
             embed.set_footer(text=f"Guild: {ctx.guild.name} ({ctx.guild.id})")
         await ctx.reply(embed=embed)
@@ -201,13 +200,6 @@ class VoteCommands(commands.Cog):
             return
 
         session_id = res.get("sessionId")
-        # ponytail: session-less links, so only one vote per host can be shown at
-        # a time and a second concurrent session overwrites the first on screen.
-        # Send /webui/{session_id} and /widget/{session_id} once a backend serves
-        # per-session routes; the frontend route table already accepts them.
-        webui_url = f"{self.config.server.base_url}/webui"
-        widget_url = f"{self.config.server.base_url}/widget"
-
         self.active_sessions[channel.id] = session_id
         self.session_meta[session_id] = {
             "channel_id": channel.id,
@@ -216,28 +208,9 @@ class VoteCommands(commands.Cog):
             "is_gated": is_gated,
         }
 
-        embed = discord.Embed(
-            title="🔥 SESI LIVE VOTING DIMULAI!",
-            description=(
-                f"Voting telah dibuka selama **{format_duration(duration_secs)}**!\n"
-                f"Ketik angka nomor pilihan Anda di chat ini untuk memberikan suara.\n"
-                + (f"*(Hanya member yang sedang berada di {stage_display} yang suaranya sah)*"
-                   if is_gated else "*(Terbuka untuk seluruh member)*")
-            ),
-            color=0x06B6D4
-        )
-
-        cand_list_text = []
-        for c in candidate_payloads:
-            cand_list_text.append(f"**[{c['keyCode']}]** {c['name']}")
-
-        embed.add_field(name="📋 Daftar Kandidat", value="\n".join(cand_list_text), inline=False)
-        embed.add_field(name="⏱️ Durasi", value=format_duration(duration_secs), inline=True)
-        embed.add_field(name="📊 Web UI Dashboard", value=f"[Buka Dashboard]({webui_url})", inline=True)
-        embed.add_field(name="📺 OBS Overlay", value=f"[Link Widget]({widget_url})", inline=True)
-        embed.set_footer(text=f"Session ID: {session_id} • Server: {ctx.guild.name if ctx.guild else 'Discord'}")
-
-        await channel.send(embed=embed)
+        await channel.send(embed=self._session_embed(
+            session_id, candidate_payloads, duration_secs, is_gated,
+            stage_display, ctx.guild.name))
 
         async def on_expire(s_id: str):
             await self._handle_auto_stop(s_id, channel)
@@ -249,6 +222,37 @@ class VoteCommands(commands.Cog):
         )
 
         await ctx.reply(f"✅ Sesi voting `{session_id}` berhasil dibuka di {channel.mention}!")
+
+    def _session_embed(self, session_id: str, candidates: list, duration_secs: int,
+                       is_gated: bool, stage_display: str, guild_name: str) -> discord.Embed:
+        """The "session started" announcement posted into the voting channel."""
+        base = self.config.server.base_url
+        gate_note = (f"*(Hanya member yang sedang berada di {stage_display} yang suaranya sah)*"
+                     if is_gated else "*(Terbuka untuk seluruh member)*")
+
+        embed = discord.Embed(
+            title="🔥 SESI LIVE VOTING DIMULAI!",
+            description=(
+                f"Voting telah dibuka selama **{format_duration(duration_secs)}**!\n"
+                f"Ketik angka nomor pilihan Anda di chat ini untuk memberikan suara.\n"
+                + gate_note
+            ),
+            color=0x06B6D4,
+        )
+        for name, value, inline in (
+            ("📋 Daftar Kandidat",
+             "\n".join(f"**[{c['keyCode']}]** {c['name']}" for c in candidates), False),
+            ("⏱️ Durasi", format_duration(duration_secs), True),
+            # ponytail: session-less links, so only one vote per host can be shown
+            # at a time and a second concurrent session overwrites the first on
+            # screen. Send /webui/{session_id} and /widget/{session_id} once a
+            # backend serves per-session routes; the frontend already accepts them.
+            ("📊 Web UI Dashboard", f"[Buka Dashboard]({base}/webui)", True),
+            ("📺 OBS Overlay", f"[Link Widget]({base}/widget)", True),
+        ):
+            embed.add_field(name=name, value=value, inline=inline)
+        embed.set_footer(text=f"Session ID: {session_id} • Server: {guild_name}")
+        return embed
 
     async def _close(self, session_id: str, channel: discord.TextChannel,
                      finalize, announcement) -> None:
