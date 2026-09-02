@@ -18,9 +18,10 @@ export function isDarkColor(hex: string): boolean {
  */
 export function getInitials(name?: string): string {
   if (!name) return '??';
-  const parts = name.trim().split(/[\s_\-\.]+/);
-  if (parts.length >= 2 && parts[0] && parts[1]) {
-    return (parts[0][0] + parts[1][0]).toUpperCase();
+  const [first, second] = name.trim().split(/[\s_\-\.]+/);
+  if (first && second) {
+    // charAt over [0]: returns '' rather than undefined, so no assertion needed
+    return (first.charAt(0) + second.charAt(0)).toUpperCase();
   }
   return name.substring(0, 2).toUpperCase();
 }
