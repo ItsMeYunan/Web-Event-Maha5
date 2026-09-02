@@ -72,11 +72,15 @@ python src-python/bot.py
 
 ### 4. Mulai voting
 ```
-!vote initiate #live-stage 5m Alpha Bravo Charlie
+!vote initiate #live-stage 5m Alpha Bravo Charlie   # di channel tertentu
+!vote initiate 5m Alpha Bravo Charlie               # di channel ini juga bisa
 !vote stop #live-stage       # kunci hasil
 !vote cancel #live-stage     # batalkan tanpa hasil
-!vote info                   # status konfigurasi
+!vote info                   # status konfigurasi (admin saja)
 ```
+
+`#channel` opsional — tanpa itu, voting berjalan di channel tempat perintah
+dikirim. Durasi menerima `30s`, `5m`, `1h`, atau angka murni (detik).
 
 ---
 
@@ -101,15 +105,20 @@ per-sesi), sedangkan `/webuixyz` tidak.
 
 ```yaml
 server:
+  host: "0.0.0.0"                     # untuk dashboard/web server (belum dipakai)
+  port: 3000
   base_url: "http://localhost:3000"   # dipakai untuk membangun link di embed
 
 discord:
   command_prefix: "!vote"
-  admin_role_ids: [112233445566778899]
-  target_stage_channel_id: 123456789012345678
+  min_role_id: 112233445566778899     # semua role di atas/sejajar role ini boleh !vote
+  admin_role_ids: [998877665544332211]  # role tambahan (opsional)
+  target_stage_channel_id: 123456789012345678   # kosongkan -> pakai voice channel admin
   voice_gate_enabled: true
 
 voting:
+  min_duration_seconds: 10
+  max_duration_seconds: 3600
   vote_mode: "ONE_TIME"        # ONE_TIME | COOLDOWN
   cooldown_seconds: 15
   candidate_colors: ["#06B6D4", "#FACC15", "#FB923C", "#A855F7"]
@@ -117,6 +126,27 @@ voting:
 
 > 🔐 `config.yaml` ikut ter-commit. Jangan menaruh token atau secret di sini —
 > gunakan `.env`.
+
+### Siapa yang boleh menjalankan `!vote`
+
+Cukup salah satu terpenuhi:
+
+1. Pemilik server.
+2. Punya izin `Administrator`, `Manage Channels`, atau `Manage Server`.
+3. Punya salah satu role di `admin_role_ids`.
+4. Role tertingginya **sejajar atau di atas** `min_role_id` dalam hierarki server.
+
+Nomor 4 memakai perbandingan hierarki discord.py, bukan angka `position` —
+beberapa role bisa berbagi posisi yang sama, jadi membandingkan posisi langsung
+tidak dapat diandalkan.
+
+### Stage gating
+
+Saat `voice_gate_enabled: true`, hanya member yang sedang berada di **stage
+channel milik sesi itu** yang suaranya dihitung. Channel-nya ditentukan sekali
+saat `initiate`: `target_stage_channel_id` bila diisi, kalau tidak ya voice
+channel tempat admin berada. Kalau gating aktif tapi tidak ada channel yang bisa
+dipakai, sesi **ditolak** — bukan dibuka tanpa pembatasan.
 
 ### Login dashboard (Discord OAuth2)
 
