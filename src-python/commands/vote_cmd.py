@@ -6,24 +6,17 @@ Handles Discord slash and prefix commands:
 - !vote cancel <#channel>
 - !vote info
 """
-import discord
-from discord import app_commands
-from discord.ext import commands
-from typing import Dict, Any, Optional, List
 import logging
+from typing import Any, Dict
 
-try:
-    from config import AppConfig
-    from utils.duration import parse_duration, format_duration
-    from utils.permissions import is_voting_admin
-    from services.api import BunApiClient
-    from services.timer import SessionTimerManager
-except ImportError:
-    from ..config import AppConfig
-    from ..utils.duration import parse_duration, format_duration
-    from ..utils.permissions import is_voting_admin
-    from ..services.api import BunApiClient
-    from ..services.timer import SessionTimerManager
+import discord
+from discord.ext import commands
+
+from config import AppConfig
+from services.api import BunApiClient
+from services.timer import SessionTimerManager
+from utils.duration import format_duration, parse_duration
+from utils.permissions import is_voting_admin
 
 logger = logging.getLogger("discord_voting.commands")
 
@@ -67,25 +60,6 @@ class VoteCommands(commands.Cog):
             value="Membatalkan sesi voting tanpa menyimpan hasil.",
             inline=False
         )
-        embed.add_field(
-            name="`!vote info`",
-            value="Melihat status konfigurasi bot dan koneksi server aktif saat ini.",
-            inline=False
-        )
-        await ctx.reply(embed=embed)
-
-    @vote_group.command(name="info")
-    async def info(self, ctx: commands.Context):
-        """Display active server diagnostics."""
-        embed = discord.Embed(
-            title="⚙️ Status Konfigurasi Bot Voting",
-            color=0x10B981
-        )
-        embed.add_field(name="🌐 Backend URL", value=f"`{self.config.server.base_url}`", inline=True)
-        embed.add_field(name="🔑 Auth Key", value="`" + ("*" * 8) + self.config.server.admin_key[-4:] + "`" if len(self.config.server.admin_key) > 4 else "`SET`", inline=True)
-        embed.add_field(name="🎙️ Voice Gating", value="✅ Aktif" if self.config.discord.voice_gate_enabled else "❌ Non-aktif (Bebas untuk semua)", inline=True)
-        embed.add_field(name="📊 Sesi Aktif di Bot", value=f"{len(self.active_sessions)} sesi berjalan", inline=True)
-        embed.set_footer(text=f"Guild: {ctx.guild.name} ({ctx.guild.id})")
         await ctx.reply(embed=embed)
 
     @vote_group.command(name="initiate")
@@ -189,11 +163,9 @@ class VoteCommands(commands.Cog):
         self.active_sessions[channel.id] = session_id
         self.session_meta[session_id] = {
             "channel_id": channel.id,
-            "guild_id": ctx.guild.id if ctx.guild else None,
-            "candidates": candidate_payloads,
-            "duration": duration_secs,
+            "keys": {c["keyCode"] for c in candidate_payloads},
             "stage_channel_id": detected_stage_id,
-            "is_gated": is_gated
+            "is_gated": is_gated,
         }
 
         # 9. Send Discord Embed to Target Channel
@@ -217,17 +189,7 @@ class VoteCommands(commands.Cog):
         embed.add_field(name="📺 OBS Overlay", value=f"[Link Widget]({widget_url})", inline=True)
         embed.set_footer(text=f"Session ID: {session_id} • Server: {ctx.guild.name if ctx.guild else 'Discord'}")
 
-        poll_msg = await channel.send(embed=embed)
-
-        # Add Reaction Emojis for quick voting
-        emoji_numbers = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
-        for idx in range(min(len(candidate_payloads), 10)):
-            try:
-                await poll_msg.add_reaction(emoji_numbers[idx])
-            except Exception:
-                pass
-
-        self.session_meta[session_id]["poll_message_id"] = poll_msg.id
+        await channel.send(embed=embed)
 
         # 10. Start Asyncio Timer Task with on_expire Auto-Stop
         async def on_expire(s_id: str):
@@ -264,11 +226,12 @@ class VoteCommands(commands.Cog):
         except Exception as e:
             logger.error(f"Failed to send ending embed: {e}")
 
-    @vote_group.command(name="stop")
-    async def stop(self, ctx: commands.Context, channel: discord.TextChannel):
-        """!vote stop #channel - Manually stop an active session."""
+    async def _end_session(self, ctx: commands.Context, channel: discord.TextChannel,
+                           finalize, announcement, reply: str):
+        """Shared body of !vote stop and !vote cancel - they differ only in which
+        backend call finalises the session and what gets announced."""
         if not is_voting_admin(ctx.author, self.config.discord.admin_role_ids):
-            await ctx.reply("❌ **Akses Ditolak:** Anda tidak memiliki izin untuk menghentikan voting.", ephemeral=True)
+            await ctx.reply("❌ **Akses Ditolak:** Anda tidak memiliki izin untuk ini.")
             return
 
         session_id = self.active_sessions.pop(channel.id, None)
@@ -280,37 +243,31 @@ class VoteCommands(commands.Cog):
         self.session_meta.pop(session_id, None)
 
         try:
-            await self.api.stop_session(session_id)
+            await finalize(session_id)
         except Exception as e:
-            logger.error(f"Error stopping session in backend: {e}")
+            logger.error(f"Backend rejected session finalisation: {e}")
 
+        if isinstance(announcement, discord.Embed):
+            await channel.send(embed=announcement)
+        else:
+            await channel.send(announcement)
+        await ctx.reply(reply.format(session_id=session_id))
+
+    @vote_group.command(name="stop")
+    async def stop(self, ctx: commands.Context, channel: discord.TextChannel):
+        """!vote stop #channel - stop an active session and lock the results."""
         embed = discord.Embed(
             title="🔒 VOTING DIHENTIKAN OLEH ADMIN",
             description=f"Sesi voting di {channel.mention} telah dihentikan oleh {ctx.author.mention}.",
-            color=0xEF4444
+            color=0xEF4444,
         )
-        await channel.send(embed=embed)
-        await ctx.reply(f"✅ Sesi `{session_id}` berhasil dihentikan.")
+        await self._end_session(ctx, channel, self.api.stop_session, embed,
+                                "✅ Sesi `{session_id}` berhasil dihentikan.")
 
     @vote_group.command(name="cancel")
     async def cancel(self, ctx: commands.Context, channel: discord.TextChannel):
-        """!vote cancel #channel - Cancel without recording results."""
-        if not is_voting_admin(ctx.author, self.config.discord.admin_role_ids):
-            await ctx.reply("❌ **Akses Ditolak:** Anda tidak memiliki izin untuk membatalkan voting.", ephemeral=True)
-            return
-
-        session_id = self.active_sessions.pop(channel.id, None)
-        if not session_id:
-            await ctx.reply(f"⚠️ Tidak ada sesi voting aktif di channel {channel.mention}.")
-            return
-
-        self.timer_mgr.cancel_timer(session_id)
-        self.session_meta.pop(session_id, None)
-
-        try:
-            await self.api.cancel_session(session_id)
-        except Exception as e:
-            logger.error(f"Error cancelling session in backend: {e}")
-
-        await channel.send(f"🚫 Sesi voting di channel ini telah dibatalkan oleh {ctx.author.mention}.")
-        await ctx.reply(f"✅ Sesi `{session_id}` berhasil dibatalkan.")
+        """!vote cancel #channel - discard the session without recording results."""
+        await self._end_session(
+            ctx, channel, self.api.cancel_session,
+            f"🚫 Sesi voting di channel ini telah dibatalkan oleh {ctx.author.mention}.",
+            "✅ Sesi `{session_id}` berhasil dibatalkan.")
