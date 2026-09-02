@@ -7,7 +7,7 @@ Handles Discord slash and prefix commands:
 - !vote info
 """
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import discord
 from discord.ext import commands
@@ -46,8 +46,9 @@ class VoteCommands(commands.Cog):
             color=0x0284C7
         )
         embed.add_field(
-            name="`!vote initiate <#channel> <duration> <cand1> <cand2> ...`",
-            value="Memulai sesi voting baru dengan durasi (cth: `5m`, `30s`, `1h`) dan minimal 2 kandidat.",
+            name="`!vote initiate [#channel] <duration> <cand1> <cand2> ...`",
+            value=("Memulai sesi voting baru dengan durasi (cth: `5m`, `30s`, `1h`) dan minimal "
+                   "2 kandidat. Tanpa `#channel`, voting berjalan di channel ini."),
             inline=False
         )
         embed.add_field(
@@ -66,13 +67,24 @@ class VoteCommands(commands.Cog):
     async def initiate(
         self,
         ctx: commands.Context,
-        channel: discord.TextChannel,
-        duration: str,
+        channel: Optional[discord.TextChannel] = None,
+        duration: str = "",
         *candidates: str
     ):
         """
         !vote initiate #live-stage 5m MrAlpha MrBravo MrCharlie
+        !vote initiate 5m MrAlpha MrBravo          (runs in the current channel)
+
+        Optional[TextChannel] makes discord.py rewind a non-channel first argument
+        so it can be read as the duration instead.
         """
+        if ctx.guild is None:
+            await ctx.reply("❌ Perintah ini hanya bisa dijalankan di dalam server.")
+            return
+
+        # Default to the channel the command was sent in.
+        channel = channel or ctx.channel
+
         # 1. Check Permissions (Works on ANY Discord server)
         if not is_voting_admin(ctx.author, self.config.discord.admin_role_ids):
             await ctx.reply("❌ **Akses Ditolak:** Anda membutuhkan izin `Administrator` / `Manage Channels` untuk memulai voting.", ephemeral=True)
@@ -115,26 +127,33 @@ class VoteCommands(commands.Cog):
                 "colorHex": color,
             })
 
-        # 6. Dynamic Stage Gate Resolution (Works on ANY Discord server)
-        # Priority 1: If admin author is currently in a Stage/Voice channel on THIS server
-        detected_stage_id = None
-        detected_stage_name = None
-        
-        if getattr(ctx.author, "voice", None) and ctx.author.voice.channel:
-            detected_stage_id = ctx.author.voice.channel.id
-            detected_stage_name = f"#{ctx.author.voice.channel.name}"
-        elif self.config.discord.target_stage_channel_id and ctx.guild:
-            stage_obj = ctx.guild.get_channel(self.config.discord.target_stage_channel_id)
-            if stage_obj:
-                detected_stage_id = stage_obj.id
-                detected_stage_name = f"#{stage_obj.name}"
+        # 6. Resolve the stage channel this session is bound to. Configured
+        # channel wins when set (explicit intent); otherwise fall back to the
+        # channel the initiating admin is currently sitting in.
+        stage = None
+        configured = self.config.discord.target_stage_channel_id
+        if configured:
+            stage = ctx.guild.get_channel(configured)
+        if stage is None:
+            author_voice = getattr(ctx.author, "voice", None)
+            stage = author_voice.channel if author_voice else None
 
-        # If voice_gate_enabled is True but no stage is found, allow open voting or warn
-        is_gated = self.config.discord.voice_gate_enabled and (detected_stage_id is not None)
-        stage_display = detected_stage_name or ("#live-stage" if is_gated else "Semua Member")
+        is_gated = self.config.discord.voice_gate_enabled
+        if is_gated and stage is None:
+            # Fail closed: starting a "gated" vote with nothing to gate on would
+            # silently let the whole server vote.
+            await ctx.reply(
+                "❌ **Voice gating aktif tapi stage channel tidak ditemukan.**\n"
+                "Masuk dulu ke stage/voice channel acara, atau set "
+                "`discord.target_stage_channel_id` di config.yaml."
+            )
+            return
+
+        stage_id = stage.id if stage else None
+        stage_display = f"#{stage.name}" if is_gated and stage else "Semua Member"
 
         # 7. Call Backend API
-        guild_id = str(ctx.guild.id) if ctx.guild else "0"
+        guild_id = str(ctx.guild.id)
         try:
             res = await self.api.create_session(
                 title=f"Voting Live: {', '.join(candidates[:2])}...",
@@ -164,7 +183,7 @@ class VoteCommands(commands.Cog):
         self.session_meta[session_id] = {
             "channel_id": channel.id,
             "keys": {c["keyCode"] for c in candidate_payloads},
-            "stage_channel_id": detected_stage_id,
+            "stage_channel_id": stage_id,
             "is_gated": is_gated,
         }
 
@@ -174,7 +193,8 @@ class VoteCommands(commands.Cog):
             description=(
                 f"Voting telah dibuka selama **{format_duration(duration_secs)}**!\n"
                 f"Ketik angka nomor pilihan Anda di chat ini untuk memberikan suara.\n"
-                + (f"*(Hanya member yang berada di {stage_display} yang suaranya sah)*" if is_gated else "*(Terbuka untuk seluruh member)*")
+                + (f"*(Hanya member yang sedang berada di {stage_display} yang suaranya sah)*"
+                   if is_gated else "*(Terbuka untuk seluruh member)*")
             ),
             color=0x06B6D4
         )
