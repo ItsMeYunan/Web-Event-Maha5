@@ -44,7 +44,7 @@
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Start (dari source code)
 
 ### 1. Prasyarat
 - Python `>= 3.11`
@@ -81,6 +81,66 @@ python src-python/bot.py
 
 `#channel` opsional — tanpa itu, voting berjalan di channel tempat perintah
 dikirim. Durasi menerima `30s`, `5m`, `1h`, atau angka murni (detik).
+
+## 🐳 Quick Start (Docker)
+
+`Dockerfile.backend` (bot) dan `packages/widget/Dockerfile` (frontend) berbasis
+**Alpine** untuk image kecil dan kompatibel lintas distro/arsitektur
+(`linux/amd64` + `linux/arm64`, dibangun otomatis oleh
+`.github/workflows/docker.yml`). Build lokal:
+
+```bash
+docker build -f Dockerfile.backend -t vote-bot .
+docker build -f packages/widget/Dockerfile -t vote-frontend packages/widget
+```
+
+### Bot
+
+Bot tidak membuka port apa pun — koneksinya keluar ke Discord Gateway dan ke
+`server.base_url`. Kredensial (`DISCORD_BOT_TOKEN`, dst.) tidak pernah di-`COPY`
+ke image; `src-python/config.py` memanggil `load_dotenv()` dan membaca
+`config.yaml` di runtime, jadi salah satu cara ini cukup:
+
+```bash
+# A. --env-file, tanpa mount apa pun (disarankan)
+docker run --rm --env-file .env vote-bot
+
+# B. mount .env langsung — python-dotenv membacanya dari /app (WORKDIR container)
+docker run --rm -v $(pwd)/.env:/app/.env:ro vote-bot
+
+# C. mount config.yaml sendiri untuk override non-secret (prefix, role id, warna);
+#    variabel env tetap menang atas isinya, lihat ENV_OVERRIDES di config.py
+docker run --rm -v $(pwd)/config.yaml:/app/config.yaml:ro --env-file .env vote-bot
+```
+
+### Frontend
+
+Image ini membangun `dist/` lalu menyajikannya lewat `nginx:alpine` pada
+**port 80** — wajib di-`-p <host>:80` saat `docker run`, image tidak listen ke
+mana pun sendiri:
+
+```bash
+# VITE_DISCORD_CLIENT_ID di-bake ke bundle JS saat build (Vite env = build-time),
+# jadi diisi lewat --build-arg, bukan docker run -e
+docker build -f packages/widget/Dockerfile \
+  --build-arg VITE_DISCORD_CLIENT_ID=your_discord_client_id_here \
+  -t vote-frontend packages/widget
+
+docker run --rm -p 8080:80 vote-frontend   # http://localhost:8080/webui
+```
+
+### Backend REST/WebSocket
+
+`lib/ws.ts` menyambung ke `ws(s)://<origin frontend>/ws/votes` — **origin yang
+sama** dengan yang menyajikan halaman, bukan URL terpisah yang bisa diisi lewat
+env. Backend REST/WS itu sendiri **belum ada di repo ini** (lihat
+[Status implementasi](#-status-implementasi)). Untuk WebSocket benar-benar
+tersambung saat deploy lewat Docker, taruh reverse proxy (mis. Nginx/Traefik) di
+depan container frontend yang meneruskan path `/ws/votes` ke service backend
+tersebut, sementara path lain tetap ke container `vote-frontend`. Bot
+(`vote-bot`) cukup butuh `server.base_url`/`BACKEND_URL` terisi dan jalur
+jaringan ke backend yang sama — satu `docker network` bila keduanya jalan di
+mesin yang sama.
 
 ---
 
