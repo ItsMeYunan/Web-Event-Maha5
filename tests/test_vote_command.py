@@ -81,6 +81,44 @@ def admin_ctx(stage_id=12345):
     return ctx
 
 
+def admin_interaction(stage_id=12345):
+    """Mirrors admin_ctx() but for a slash-command Interaction."""
+    interaction = MagicMock()
+    interaction.user.id = 1
+    interaction.user.voice = None
+    interaction.guild.owner_id = 1
+    interaction.guild.id = 8888
+    interaction.guild.get_channel = lambda cid: (
+        MagicMock(id=stage_id, name="live-stage") if stage_id and cid == stage_id else None
+    )
+    interaction.response.send_message = AsyncMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup.send = AsyncMock()
+    return interaction
+
+
+def non_admin_interaction():
+    interaction = MagicMock()
+    interaction.user.id = 2
+    interaction.user.guild_permissions.administrator = False
+    interaction.user.guild_permissions.manage_channels = False
+    interaction.user.guild_permissions.manage_guild = False
+    interaction.user.roles = []
+    interaction.user.top_role = None
+    interaction.guild.owner_id = 1
+    interaction.guild.get_role = lambda _: None
+    interaction.response.send_message = AsyncMock()
+    return interaction
+
+
+def mentioned_user(user_id, name):
+    """A candidate mentioned via a slash command user option."""
+    member = MagicMock()
+    member.id = user_id
+    member.display_name = name
+    return member
+
+
 @pytest.mark.asyncio
 async def test_initiate_registers_session(setup):
     vote_cog, api = setup["vote_cog"], setup["api"]
@@ -114,6 +152,83 @@ async def test_initiate_rejects_candidate_list_too_long_for_embed_field(setup):
     assert not channel.send.called
     reply = ctx.reply.await_args.args[0]
     assert "1024" in reply
+
+
+@pytest.mark.asyncio
+async def test_slash_initiate_registers_session_from_mentioned_users(setup):
+    vote_cog, api = setup["vote_cog"], setup["api"]
+    interaction = admin_interaction()
+    interaction.channel = MagicMock(id=7777, mention="<#7777>")
+    interaction.channel.send = AsyncMock()
+    alpha, bravo, charlie = mentioned_user(10, "Alpha"), mentioned_user(20, "Bravo"), mentioned_user(30, "Charlie")
+
+    await vote_cog.initiate_slash.callback(
+        vote_cog, interaction, "5m", alpha, bravo, charlie,
+        None, None, None, None, None, None, None,
+    )
+
+    assert vote_cog.active_sessions[7777] == "sess_test_100"
+    interaction.response.defer.assert_awaited_once()
+    sent_candidates = api.create_session.await_args.kwargs["candidates"]
+    assert [c["name"] for c in sent_candidates] == ["Alpha", "Bravo", "Charlie"]
+    assert interaction.channel.send.called
+    confirmation = interaction.followup.send.await_args.args[0]
+    assert "sess_test_100" in confirmation
+
+
+@pytest.mark.asyncio
+async def test_slash_initiate_denies_non_admin(setup):
+    vote_cog, api = setup["vote_cog"], setup["api"]
+    interaction = non_admin_interaction()
+    interaction.channel = MagicMock(id=7777, mention="<#7777>")
+
+    await vote_cog.initiate_slash.callback(
+        vote_cog, interaction, "5m", mentioned_user(10, "Alpha"), mentioned_user(20, "Bravo"),
+        None, None, None, None, None, None, None, None,
+    )
+
+    assert not api.create_session.called
+    reply = interaction.response.send_message.await_args.args[0]
+    assert "Akses Ditolak" in reply
+    assert interaction.response.send_message.await_args.kwargs.get("ephemeral") is True
+
+
+@pytest.mark.asyncio
+async def test_slash_initiate_dedupes_same_user_mentioned_twice(setup):
+    """Discord's picker doesn't stop the same person filling two option
+    slots; that must not count as two distinct candidates."""
+    vote_cog, api = setup["vote_cog"], setup["api"]
+    interaction = admin_interaction()
+    interaction.channel = MagicMock(id=7777, mention="<#7777>")
+    same_user = mentioned_user(10, "Alpha")
+
+    await vote_cog.initiate_slash.callback(
+        vote_cog, interaction, "5m", same_user, same_user,
+        None, None, None, None, None, None, None, None,
+    )
+
+    assert not api.create_session.called
+    reply = interaction.response.send_message.await_args.args[0]
+    assert "minimal 2 kandidat" in reply
+    assert interaction.response.send_message.await_args.kwargs.get("ephemeral") is True
+
+
+@pytest.mark.asyncio
+async def test_slash_initiate_rejects_channel_with_active_session(setup):
+    vote_cog, api = setup["vote_cog"], setup["api"]
+    register(vote_cog)                     # channel 5555 already has sess_test_100
+    interaction = admin_interaction()
+    interaction.channel = MagicMock(id=5555, mention="<#5555>")
+
+    await vote_cog.initiate_slash.callback(
+        vote_cog, interaction, "5m", mentioned_user(10, "Alpha"), mentioned_user(20, "Bravo"),
+        None, None, None, None, None, None, None, None,
+    )
+
+    assert not api.create_session.called
+    reply = interaction.response.send_message.await_args.args[0]
+    assert "sudah memiliki sesi voting aktif" in reply
+
 
 
 @pytest.mark.asyncio

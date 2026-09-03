@@ -22,6 +22,15 @@ logging.basicConfig(
 logger = logging.getLogger("discord_voting")
 
 
+class VotingBot(commands.Bot):
+    """setup_hook runs once per process, after login but before the gateway
+    connects (unlike on_ready, which re-fires on every reconnect) - the
+    correct place for a one-time slash-command sync."""
+    async def setup_hook(self) -> None:
+        synced = await self.tree.sync()
+        logger.info(f"🔗 Slash commands synced: {len(synced)}")
+
+
 async def main():
     config = load_config()
     if not config.discord.bot_token:
@@ -35,7 +44,7 @@ async def main():
     intents.message_content = True   # to read the "1"/"2"/... vote messages
     intents.voice_states = True      # for the stage-channel gate
 
-    bot = commands.Bot(
+    bot = VotingBot(
         command_prefix=commands.when_mentioned_or(config.discord.command_prefix + " "),
         intents=intents,
         help_command=None,

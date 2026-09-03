@@ -52,6 +52,8 @@
 - Python `>= 3.11`
 - Node.js `>= 20`
 - Discord bot token, dengan intent **Message Content** dan **Voice States** aktif
+- Invite URL bot harus menyertakan scope **`applications.commands`** (selain `bot`) —
+  tanpa ini slash command tidak muncul di server meski sudah ter-sync.
 
 ### 2. Frontend
 ```bash
@@ -73,6 +75,8 @@ python src-python/bot.py
 ```
 
 ### 4. Mulai voting
+
+Lewat chat prefix:
 ```
 !vote initiate #live-stage 5m Alpha Bravo Charlie   # di channel tertentu
 !vote initiate 5m Alpha Bravo Charlie               # di channel ini juga bisa
@@ -83,6 +87,15 @@ python src-python/bot.py
 
 `#channel` opsional — tanpa itu, voting berjalan di channel tempat perintah
 dikirim. Durasi menerima `30s`, `5m`, `1h`, atau angka murni (detik).
+
+Atau lewat slash command — `/vote initiate`, kandidat berupa mention user
+(bukan nama bebas): `duration`, `user1`, `user2` wajib, `user3`…`user10` dan
+`channel` opsional. Minimal 2 kandidat *berbeda* — mention yang sama di dua
+slot dihitung satu. Sesi terdaftar lewat jalur yang sama persis dengan prefix
+command (`VoteCommands._create_session`), jadi validasi durasi/panjang embed/
+stage gating berlaku identik. Command disinkron sekali per start bot lewat
+`setup_hook` — perubahan definisi command butuh restart bot untuk sinkron
+ulang (global sync bisa perlu waktu hingga 1 jam untuk propagasi ke Discord).
 
 ## 🐳 Quick Start (Docker)
 
@@ -212,7 +225,7 @@ dipakai, sesi **ditolak** — bukan dibuka tanpa pembatasan.
 ├── src-python/
 │   ├── bot.py                  # entrypoint, gateway orchestrator + embedded API server
 │   ├── config.py               # config.yaml + .env
-│   ├── commands/vote_cmd.py    # !vote initiate | stop | cancel | info
+│   ├── commands/vote_cmd.py    # !vote initiate|stop|cancel|info + /vote initiate (slash)
 │   ├── listeners/              # vote lewat chat & reaction
 │   ├── services/               # api client, stage gate, timer, embedded HTTP API (webserver.py)
 │   └── utils/                  # durasi, permission
@@ -242,6 +255,7 @@ pip install pytest && python -m pytest tests/ -q
 | Bagian | Status |
 |--------|--------|
 | Bot: `!vote initiate` / `stop` / `cancel` / `info` | ✅ |
+| Slash command `/vote initiate` (kandidat via mention, min 2) | ✅ |
 | Vote lewat chat & reaction, stage gating | ✅ |
 | Frontend `/widget` dan `/webui` (showcase, Framer Motion) | ✅ |
 | Link sesi (`/webui/<id>`, `/widget/<id>`) di `!vote initiate` | ✅ bot, frontend belum baca segmen ini |

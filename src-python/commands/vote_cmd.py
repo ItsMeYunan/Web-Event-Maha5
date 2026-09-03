@@ -1,8 +1,9 @@
 """Vote commands: !vote initiate | stop | cancel."""
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 from config import AppConfig
@@ -13,16 +14,15 @@ from utils.permissions import is_voting_admin
 
 logger = logging.getLogger("discord_voting.commands")
 
+MAX_SLASH_CANDIDATES = 10
+
 HELP_COMMANDS = (
     ("`!vote initiate [#channel] <duration> <cand1> <cand2> ...`",
      "Memulai sesi voting baru dengan durasi (cth: `5m`, `30s`, `1h`) dan minimal 2 kandidat. "
      "Tanpa `#channel`, voting berjalan di channel ini."),
-    ("`!vote stop <#channel>`",
-     "Menghentikan sesi voting yang sedang berjalan dan mengunci hasil akhir."),
-    ("`!vote cancel <#channel>`",
-     "Membatalkan sesi voting tanpa menyimpan hasil."),
-    ("`!vote info`",
-     "Menampilkan konfigurasi bot dan sesi yang sedang berjalan."),
+    ("`/vote initiate` (slash command)",
+     f"Sama seperti di atas, tapi kandidat berupa mention user Discord (minimal 2, "
+     f"maksimal {MAX_SLASH_CANDIDATES}) alih-alih nama bebas."),
 )
 
 DENIED = "❌ **Akses Ditolak:** Anda tidak memiliki izin untuk menjalankan perintah ini."
@@ -145,26 +145,145 @@ class VoteCommands(commands.Cog):
             await ctx.reply("❌ **Error:** Sesi voting membutuhkan minimal 2 kandidat. Contoh: `!vote initiate #channel 5m Alpha Bravo`.")
             return
 
+        result = await self._create_session(
+            guild=ctx.guild,
+            channel=channel,
+            author=ctx.author,
+            duration=duration,
+            candidate_names=[c.strip() for c in candidates],
+        )
+        if isinstance(result, str):
+            await ctx.reply(result)
+            return
+
+        _session_id, embed, confirmation = result
+        await channel.send(embed=embed)
+        await ctx.reply(confirmation)
+
+    vote_slash = app_commands.Group(name="vote", description="Perintah live voting")
+
+    @vote_slash.command(name="initiate", description="Mulai sesi voting baru dengan kandidat berupa mention user")
+    @app_commands.describe(
+        duration="Durasi voting, contoh: 5m, 30s, 1h",
+        user1="Kandidat 1 (wajib)",
+        user2="Kandidat 2 (wajib)",
+        user3="Kandidat 3 (opsional)",
+        user4="Kandidat 4 (opsional)",
+        user5="Kandidat 5 (opsional)",
+        user6="Kandidat 6 (opsional)",
+        user7="Kandidat 7 (opsional)",
+        user8="Kandidat 8 (opsional)",
+        user9="Kandidat 9 (opsional)",
+        user10="Kandidat 10 (opsional)",
+        channel="Channel tempat voting berjalan (opsional, default: channel ini)",
+    )
+    async def initiate_slash(
+        self,
+        interaction: discord.Interaction,
+        duration: str,
+        user1: discord.Member,
+        user2: discord.Member,
+        user3: Optional[discord.Member] = None,
+        user4: Optional[discord.Member] = None,
+        user5: Optional[discord.Member] = None,
+        user6: Optional[discord.Member] = None,
+        user7: Optional[discord.Member] = None,
+        user8: Optional[discord.Member] = None,
+        user9: Optional[discord.Member] = None,
+        user10: Optional[discord.Member] = None,
+        channel: Optional[discord.TextChannel] = None,
+    ):
+        """/vote initiate 5m @Alpha @Bravo @Charlie - candidates are mentioned
+        members instead of free-text names (MAX_SLASH_CANDIDATES slots, min 2)."""
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "❌ Perintah ini hanya bisa dijalankan di dalam server.", ephemeral=True)
+            return
+
+        if not self._is_admin(interaction.user):
+            await interaction.response.send_message(DENIED, ephemeral=True)
+            return
+
+        target_channel = channel or interaction.channel
+        if target_channel.id in self.active_sessions:
+            await interaction.response.send_message(
+                f"⚠️ Channel {target_channel.mention} sudah memiliki sesi voting aktif! "
+                f"Hentikan terlebih dahulu dengan `!vote stop {target_channel.mention}`.",
+                ephemeral=True,
+            )
+            return
+
+        # Discord's picker doesn't stop the same person filling two slots.
+        seen_ids: set = set()
+        candidates = []
+        for member in (user1, user2, user3, user4, user5, user6, user7, user8, user9, user10):
+            if member is None or member.id in seen_ids:
+                continue
+            seen_ids.add(member.id)
+            candidates.append(member)
+
+        if len(candidates) < 2:
+            await interaction.response.send_message(
+                "❌ **Error:** Sesi voting membutuhkan minimal 2 kandidat berbeda.", ephemeral=True)
+            return
+
+        # create_session is a network call; defer to stay under Discord's 3s
+        # initial-response deadline, then answer via followup either way.
+        await interaction.response.defer()
+
+        result = await self._create_session(
+            guild=interaction.guild,
+            channel=target_channel,
+            author=interaction.user,
+            duration=duration,
+            candidate_names=[member.display_name for member in candidates],
+        )
+        if isinstance(result, str):
+            await interaction.followup.send(result, ephemeral=True)
+            return
+
+        _session_id, embed, confirmation = result
+        await target_channel.send(embed=embed)
+        await interaction.followup.send(confirmation)
+
+    async def _create_session(
+        self,
+        *,
+        guild: discord.Guild,
+        channel: discord.TextChannel,
+        author: discord.Member,
+        duration: str,
+        candidate_names: List[str],
+    ) -> Union[str, "tuple[str, discord.Embed, str]"]:
+        """Shared by !vote initiate and /vote initiate: everything from
+        validating duration/candidates through registering the session and
+        starting its timer. Returns an error message string on failure, or
+        (session_id, announcement_embed, confirmation_text) on success.
+
+        Callers differ in how they report back (ctx.reply vs an interaction),
+        so admin/duplicate-session checks - which need caller-specific reply
+        semantics like ephemeral - stay in each entry point, not here.
+        """
+        if len(candidate_names) < 2:
+            return "❌ **Error:** Sesi voting membutuhkan minimal 2 kandidat."
+
         try:
             duration_secs = parse_duration(duration)
             if duration_secs < self.config.voting.min_duration_seconds:
-                await ctx.reply(f"❌ Durasi minimal adalah {self.config.voting.min_duration_seconds} detik.")
-                return
+                return f"❌ Durasi minimal adalah {self.config.voting.min_duration_seconds} detik."
             if duration_secs > self.config.voting.max_duration_seconds:
-                await ctx.reply(f"❌ Durasi maksimal adalah {self.config.voting.max_duration_seconds // 60} menit.")
-                return
+                return f"❌ Durasi maksimal adalah {self.config.voting.max_duration_seconds // 60} menit."
         except ValueError as e:
-            await ctx.reply(f"❌ **Format Durasi Salah:** {e}")
-            return
+            return f"❌ **Format Durasi Salah:** {e}"
 
         # colours cycle when there are more candidates than palette entries
         palette = self.config.voting.candidate_colors
         candidate_payloads = []
-        for idx, name in enumerate(candidates):
+        for idx, name in enumerate(candidate_names):
             color = palette[idx % len(palette)]
             candidate_payloads.append({
                 "keyCode": str(idx + 1),
-                "name": name.strip(),
+                "name": name,
                 "colorHex": color,
             })
 
@@ -174,12 +293,11 @@ class VoteCommands(commands.Cog):
         # with no running timer (channel.send happens after state is set below).
         field_value = _candidates_field(candidate_payloads)
         if len(field_value) > EMBED_FIELD_VALUE_LIMIT:
-            await ctx.reply(
+            return (
                 f"❌ **Error:** Daftar kandidat terlalu panjang untuk satu embed Discord "
                 f"(maksimal {EMBED_FIELD_VALUE_LIMIT} karakter, saat ini {len(field_value)}). "
                 "Kurangi jumlah atau panjang nama kandidat."
             )
-            return
 
         # Resolve the stage channel this session is bound to. Configured
         # channel wins when set (explicit intent); otherwise fall back to the
@@ -187,41 +305,38 @@ class VoteCommands(commands.Cog):
         stage = None
         configured = self.config.discord.target_stage_channel_id
         if configured:
-            stage = ctx.guild.get_channel(configured)
+            stage = guild.get_channel(configured)
         if stage is None:
-            author_voice = getattr(ctx.author, "voice", None)
+            author_voice = getattr(author, "voice", None)
             stage = author_voice.channel if author_voice else None
 
         is_gated = self.config.discord.voice_gate_enabled
         if is_gated and stage is None:
             # Fail closed: starting a "gated" vote with nothing to gate on would
             # silently let the whole server vote.
-            await ctx.reply(
+            return (
                 "❌ **Voice gating aktif tapi stage channel tidak ditemukan.**\n"
                 "Masuk dulu ke stage/voice channel acara, atau set "
                 "`discord.target_stage_channel_id` di config.yaml."
             )
-            return
 
         stage_id = stage.id if stage else None
         stage_display = f"#{stage.name}" if is_gated and stage else "Semua Member"
 
-        guild_id = str(ctx.guild.id)
         try:
             res = await self.api.create_session(
-                title=f"Voting Live: {', '.join(candidates[:2])}...",
+                title=f"Voting Live: {', '.join(candidate_names[:2])}...",
                 candidates=candidate_payloads,
                 duration_seconds=duration_secs,
                 channel_id=str(channel.id),
-                guild_id=guild_id,
+                guild_id=str(guild.id),
                 vote_mode=self.config.voting.vote_mode,
                 cooldown_seconds=self.config.voting.cooldown_seconds,
                 is_stage_gated=is_gated,
                 stage_name=stage_display
             )
         except Exception as e:
-            await ctx.reply(f"❌ **Gagal menghubungi Backend ({self.config.server.base_url}):** {e}\n*Pastikan backend server sudah berjalan.*")
-            return
+            return f"❌ **Gagal menghubungi Backend ({self.config.server.base_url}):** {e}\n*Pastikan backend server sudah berjalan.*"
 
         session_id = res.get("sessionId")
         self.active_sessions[channel.id] = session_id
@@ -232,9 +347,8 @@ class VoteCommands(commands.Cog):
             "is_gated": is_gated,
         }
 
-        await channel.send(embed=self._session_embed(
-            session_id, candidate_payloads, duration_secs, is_gated,
-            stage_display, ctx.guild.name))
+        embed = self._session_embed(session_id, candidate_payloads, duration_secs, is_gated,
+                                     stage_display, guild.name)
 
         async def on_expire(s_id: str):
             await self._handle_auto_stop(s_id, channel)
@@ -245,7 +359,7 @@ class VoteCommands(commands.Cog):
             on_expire=on_expire
         )
 
-        await ctx.reply(f"✅ Sesi voting `{session_id}` berhasil dibuka di {channel.mention}!")
+        return session_id, embed, f"✅ Sesi voting `{session_id}` berhasil dibuka di {channel.mention}!"
 
     def _session_embed(self, session_id: str, candidates: list, duration_secs: int,
                        is_gated: bool, stage_display: str, guild_name: str) -> discord.Embed:
