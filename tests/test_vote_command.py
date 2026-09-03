@@ -96,6 +96,27 @@ async def test_initiate_registers_session(setup):
 
 
 @pytest.mark.asyncio
+async def test_initiate_rejects_candidate_list_too_long_for_embed_field(setup):
+    """Discord hard-rejects a single embed field over 1024 chars. The guard
+    must catch this before any session state is touched (not after), or a
+    rejected send leaves a registered session with no confirmation and no
+    running timer - !vote stop is the only way out."""
+    vote_cog, api = setup["vote_cog"], setup["api"]
+    channel = MagicMock(id=6666, mention="<#6666>")
+    channel.send = AsyncMock()
+    ctx = admin_ctx()
+    long_candidates = [f"Candidate-{'x' * 60}-{i}" for i in range(20)]  # well over 1024 joined
+
+    await vote_cog.initiate.callback(vote_cog, ctx, channel, "5m", *long_candidates)
+
+    assert 6666 not in vote_cog.active_sessions
+    assert not api.create_session.called
+    assert not channel.send.called
+    reply = ctx.reply.await_args.args[0]
+    assert "1024" in reply
+
+
+@pytest.mark.asyncio
 async def test_vote_from_stage_is_submitted(setup):
     register(setup["vote_cog"])
     msg = voter(42, voice_channel_id=12345)
