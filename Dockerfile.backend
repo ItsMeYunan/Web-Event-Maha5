@@ -11,4 +11,6 @@ COPY config.yaml config.yaml
 RUN addgroup -S bot && adduser -S bot -G bot
 USER bot
 
+EXPOSE 3000
+
 CMD ["python", "src-python/bot.py"]

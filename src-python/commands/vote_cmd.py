@@ -243,12 +243,8 @@ class VoteCommands(commands.Cog):
             ("📋 Daftar Kandidat",
              "\n".join(f"**[{c['keyCode']}]** {c['name']}" for c in candidates), False),
             ("⏱️ Durasi", format_duration(duration_secs), True),
-            # ponytail: session-less links, so only one vote per host can be shown
-            # at a time and a second concurrent session overwrites the first on
-            # screen. Send /webui/{session_id} and /widget/{session_id} once a
-            # backend serves per-session routes; the frontend already accepts them.
-            ("📊 Web UI Dashboard", f"[Buka Dashboard]({base}/webui)", True),
-            ("📺 OBS Overlay", f"[Link Widget]({base}/widget)", True),
+            ("📊 Web UI Dashboard", f"[Buka Dashboard]({base}/webui/{session_id})", True),
+            ("📺 OBS Overlay", f"[Link Widget]({base}/widget/{session_id})", True),
         ):
             embed.add_field(name=name, value=value, inline=inline)
         embed.set_footer(text=f"Session ID: {session_id} • Server: {guild_name}")

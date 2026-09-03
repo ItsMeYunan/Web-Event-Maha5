@@ -14,8 +14,9 @@
 - 🎙️ **Stage channel gating** — hanya member yang berada di Stage/voice channel yang suaranya dihitung.
 - 🗳️ **Vote lewat chat** — peserta mengetik nomor kandidat (`1`, `2`, … `n`) di channel voting.
 - 📺 **OBS overlay** (`/widget`) — latar transparan, kartu kandidat dengan avatar voter terakhir.
-- 📊 **Web dashboard** (`/webui`) — countdown besar, kartu kandidat, total suara.
-- 🏆 **Rank animation** — kandidat yang menyalip berpindah posisi dengan animasi CSS murni (tanpa library animasi).
+- 📊 **Web UI** (`/webui`) — countdown besar, kartu kandidat, total suara. Tanpa path/query dikenal,
+  keduanya tampil sekaligus dalam satu halaman showcase dengan panel kontrol dev.
+- 🏆 **Rank animation** — kandidat yang menyalip berpindah posisi lewat Framer Motion (`layout` + spring transition).
 - 🎨 **Konfigurasi YAML + `.env`** — warna kandidat, mode vote, durasi, dan gating.
 
 ---
@@ -37,7 +38,8 @@
                                                      └────────────────────────┘
 ```
 
-> ⚠️ **Status:** backend REST/WebSocket belum ada di repository ini. Bot memanggil
+> ⚠️ **Status:** backend REST sesi voting (`create_session`/`process_vote`/`stop`/
+> `cancel`) dan WebSocket hub **belum ada di repository ini**. Bot memanggil
 > `BunApiClient` (`src-python/services/api.py`) ke `server.base_url`, dan frontend
 > membuka socket ke `/ws/votes`. Keduanya membutuhkan service yang menyediakan
 > endpoint tersebut. Lihat [Status implementasi](#-status-implementasi).
@@ -58,7 +60,7 @@ npm install
 npm run dev          # http://localhost:5173/webui
 ```
 
-Build produksi (menjalankan typecheck lebih dulu — type error menggagalkan build):
+Build produksi (langsung `vite build`, tanpa langkah typecheck terpisah):
 ```bash
 npm run build
 ```
@@ -85,9 +87,8 @@ dikirim. Durasi menerima `30s`, `5m`, `1h`, atau angka murni (detik).
 ## 🐳 Quick Start (Docker)
 
 `Dockerfile.backend` (bot) dan `packages/widget/Dockerfile` (frontend) berbasis
-**Alpine** untuk image kecil dan kompatibel lintas distro/arsitektur
-(`linux/amd64` + `linux/arm64`, dibangun otomatis oleh
-`.github/workflows/docker.yml`). Build lokal:
+**Alpine** untuk image kecil, dibangun otomatis oleh
+`.github/workflows/docker.yml` (`linux/amd64`). Build lokal:
 
 ```bash
 docker build -f Dockerfile.backend -t vote-bot .
@@ -96,21 +97,24 @@ docker build -f packages/widget/Dockerfile -t vote-frontend packages/widget
 
 ### Bot
 
-Bot tidak membuka port apa pun — koneksinya keluar ke Discord Gateway dan ke
-`server.base_url`. Kredensial (`DISCORD_BOT_TOKEN`, dst.) tidak pernah di-`COPY`
-ke image; `src-python/config.py` memanggil `load_dotenv()` dan membaca
-`config.yaml` di runtime, jadi salah satu cara ini cukup:
+Bot berjalan sebagai gateway client (koneksi keluar ke Discord) **plus**
+listen di `server.port` (default `3000`) untuk `/api/*`
+(`src-python/services/webserver.py` — belum dipakai frontend saat ini) — wajib
+di-`-p <host>:3000` saat `docker run` jika sesuatu perlu menjangkaunya.
+Kredensial (`DISCORD_BOT_TOKEN`, dst.) tidak pernah di-`COPY` ke image;
+`src-python/config.py` memanggil `load_dotenv()` dan membaca `config.yaml` di
+runtime, jadi salah satu cara ini cukup:
 
 ```bash
 # A. --env-file, tanpa mount apa pun (disarankan)
-docker run --rm --env-file .env vote-bot
+docker run --rm -p 3000:3000 --env-file .env vote-bot
 
 # B. mount .env langsung — python-dotenv membacanya dari /app (WORKDIR container)
-docker run --rm -v $(pwd)/.env:/app/.env:ro vote-bot
+docker run --rm -p 3000:3000 -v $(pwd)/.env:/app/.env:ro vote-bot
 
 # C. mount config.yaml sendiri untuk override non-secret (prefix, role id, warna);
 #    variabel env tetap menang atas isinya, lihat ENV_OVERRIDES di config.py
-docker run --rm -v $(pwd)/config.yaml:/app/config.yaml:ro --env-file .env vote-bot
+docker run --rm -p 3000:3000 -v $(pwd)/config.yaml:/app/config.yaml:ro --env-file .env vote-bot
 ```
 
 ### Frontend
@@ -120,12 +124,7 @@ Image ini membangun `dist/` lalu menyajikannya lewat `nginx:alpine` pada
 mana pun sendiri:
 
 ```bash
-# VITE_DISCORD_CLIENT_ID di-bake ke bundle JS saat build (Vite env = build-time),
-# jadi diisi lewat --build-arg, bukan docker run -e
-docker build -f packages/widget/Dockerfile \
-  --build-arg VITE_DISCORD_CLIENT_ID=your_discord_client_id_here \
-  -t vote-frontend packages/widget
-
+docker build -f packages/widget/Dockerfile -t vote-frontend packages/widget
 docker run --rm -p 8080:80 vote-frontend   # http://localhost:8080/webui
 ```
 
@@ -133,29 +132,24 @@ docker run --rm -p 8080:80 vote-frontend   # http://localhost:8080/webui
 
 `lib/ws.ts` menyambung ke `ws(s)://<origin frontend>/ws/votes` — **origin yang
 sama** dengan yang menyajikan halaman, bukan URL terpisah yang bisa diisi lewat
-env. Backend REST/WS itu sendiri **belum ada di repo ini** (lihat
+env. Sesi voting (REST + WS hub) itu sendiri **belum ada di repo ini** (lihat
 [Status implementasi](#-status-implementasi)). Untuk WebSocket benar-benar
 tersambung saat deploy lewat Docker, taruh reverse proxy (mis. Nginx/Traefik) di
 depan container frontend yang meneruskan path `/ws/votes` ke service backend
-tersebut, sementara path lain tetap ke container `vote-frontend`. Bot
-(`vote-bot`) cukup butuh `server.base_url`/`BACKEND_URL` terisi dan jalur
-jaringan ke backend yang sama — satu `docker network` bila keduanya jalan di
-mesin yang sama.
+tersebut, sementara path lain tetap ke container `vote-frontend`.
 
 ---
 
 ## 🖥️ Halaman
 
-| URI | Untuk | Tampilan |
-|-----|-------|----------|
-| `/widget` | OBS Browser Source | Latar transparan, lebar 320px, pill status stage + kartu kandidat. Kosong total sebelum data masuk, agar overlay tidak menampilkan apa pun saat belum terhubung. |
-| `/webui` | Browser / monitoring | Latar terang, countdown monospace 64px, banner status gating, kartu kandidat, total suara. |
-| `/dashboard` | Panitia / admin | Login Discord OAuth2, lalu ringkasan sesi: status, total suara, jumlah kandidat, gating, dan perolehan per kandidat. |
+`getRouteMode()` di `App.tsx` membaca path, hash, lalu query string `?view=`,
+dalam urutan itu:
 
-URI lain menghasilkan halaman "tidak ditemukan" — dashboard bukan lagi fallback
-untuk sembarang path. Pencocokan dilakukan per segmen, sehingga
-`/webui/<sessionId>` ikut dikenali (siap dipakai saat backend menyediakan rute
-per-sesi), sedangkan `/webuixyz` tidak.
+| Mode | Dipicu oleh | Tampilan |
+|------|-------------|----------|
+| `widget` | path/hash mengandung `widget`, atau `?view=widget` | Overlay OBS transparan, lebar 320px — untuk Browser Source. |
+| `dashboard` | path/hash mengandung `webui`, atau `?view=webui`/`?view=dashboard` | Web UI: countdown besar, banner status gating, kartu kandidat, total suara. |
+| `both` (default) | tidak ada yang cocok | Split showcase — kedua tampilan sekaligus, plus `ControlsPanel` untuk mensimulasikan vote/timer saat development. |
 
 ---
 
@@ -165,7 +159,7 @@ per-sesi), sedangkan `/webuixyz` tidak.
 
 ```yaml
 server:
-  host: "0.0.0.0"                     # untuk dashboard/web server (belum dipakai)
+  host: "0.0.0.0"                     # bind address for the bot's embedded API (/api/*)
   port: 3000
   base_url: "http://localhost:3000"   # dipakai untuk membangun link di embed
 
@@ -208,24 +202,6 @@ saat `initiate`: `target_stage_channel_id` bila diisi, kalau tidak ya voice
 channel tempat admin berada. Kalau gating aktif tapi tidak ada channel yang bisa
 dipakai, sesi **ditolak** — bukan dibuka tanpa pembatasan.
 
-### Login dashboard (Discord OAuth2)
-
-`/dashboard` memakai **implicit grant**, jadi tidak ada client secret di frontend.
-
-1. Discord Developer Portal → aplikasi Anda → **OAuth2**.
-2. Tambahkan Redirect URI: `http://localhost:5173/dashboard` (dev) dan
-   `<base_url>/dashboard` (produksi). Harus sama persis.
-3. Isi `VITE_DISCORD_CLIENT_ID` di `.env` (root repo — Vite membacanya lewat
-   `envDir`). Hanya variabel berawalan `VITE_` yang sampai ke browser.
-
-Scope yang diminta hanya `identify` (nama + avatar). Token disimpan di
-`sessionStorage`, hilang saat tab ditutup, dan dihapus dari address bar begitu
-diterima.
-
-> ⚠️ Login membuktikan **identitas**, bukan **wewenang**. Semua akun Discord bisa
-> masuk dan membaca halaman ini. Pembatasan berdasarkan role hanya bisa
-> dipaksakan oleh backend.
-
 ---
 
 ## 📁 Struktur
@@ -234,20 +210,17 @@ diterima.
 .
 ├── config.yaml
 ├── src-python/
-│   ├── bot.py                  # entrypoint, gateway orchestrator
+│   ├── bot.py                  # entrypoint, gateway orchestrator + embedded API server
 │   ├── config.py               # config.yaml + .env
 │   ├── commands/vote_cmd.py    # !vote initiate | stop | cancel | info
 │   ├── listeners/              # vote lewat chat & reaction
-│   ├── services/               # api client, stage gate, timer
+│   ├── services/               # api client, stage gate, timer, embedded HTTP API (webserver.py)
 │   └── utils/                  # durasi, permission
-├── packages/widget/            # React 18 + Vite 5
-│   ├── src/App.tsx             # dispatcher: URI -> handler
-│   ├── src/lib/route.ts        # tabel rute
+├── packages/widget/            # React 18 + Vite 5 + Framer Motion
+│   ├── src/App.tsx             # routing (path/hash/query) + widget/webui/split view
 │   ├── src/lib/ws.ts           # WebSocket client + reconnect
-│   ├── src/lib/auth.ts         # Discord OAuth2 (implicit grant)
-│   ├── src/views/              # WidgetView, WebUiView, DashboardView, LoginView
-│   ├── src/components/         # kartu, list, avatar, indikator
-│   └── src/__check__/          # render check (tanpa test framework)
+│   ├── src/components/         # WidgetOverlay, DashboardOverlay, ControlsPanel (dev sim), kartu, avatar
+│   └── src/lib/                # types, warna
 └── tests/                      # pytest untuk bot
 ```
 
@@ -256,28 +229,13 @@ diterima.
 ## 🧪 Verifikasi
 
 ```bash
-# frontend
+# frontend (tidak ada langkah typecheck terpisah - vite build saja)
 cd packages/widget
-npm run typecheck   # src/ + vite.config.ts
-npm run check       # render + routing check
 npm run build
 
 # bot
 pip install pytest && python -m pytest tests/ -q
 ```
-
-`npm run check` merender daftar kandidat lalu memastikan urutan rank, offset
-`translateY`, tinggi container, dan 11 kasus routing — gagal dengan exit code
-non-nol bila logikanya rusak.
-
-### Standar TypeScript
-
-`tsconfig.json` mengaktifkan `strict`, `noUncheckedIndexedAccess`,
-`exactOptionalPropertyTypes`, `noUnusedLocals`, dan `noUnusedParameters`.
-`vite.config.ts` diperiksa lewat `tsconfig.node.json`. `npm run build`
-menjalankan typecheck lebih dulu, jadi type error tidak akan ikut ter-build.
-
----
 
 ## 📌 Status implementasi
 
@@ -285,12 +243,10 @@ menjalankan typecheck lebih dulu, jadi type error tidak akan ikut ter-build.
 |--------|--------|
 | Bot: `!vote initiate` / `stop` / `cancel` / `info` | ✅ |
 | Vote lewat chat & reaction, stage gating | ✅ |
-| Frontend `/widget` dan `/webui` | ✅ |
-| Dashboard `/dashboard` + login Discord | ✅ frontend |
-| Token exchange OAuth2 (authorization code) | ❌ butuh backend — lihat debt |
-| Pembatasan dashboard berdasarkan role | ❌ butuh backend |
-| Backend REST + WebSocket hub | ❌ belum ada di repo |
-| Rute per-sesi (`/webui/<id>`) | ⏳ frontend siap, bot masih mengirim link tanpa session id |
+| Frontend `/widget` dan `/webui` (showcase, Framer Motion) | ✅ |
+| Link sesi (`/webui/<id>`, `/widget/<id>`) di `!vote initiate` | ✅ bot, frontend belum baca segmen ini |
+| Bot: API tertanam (`services/webserver.py`) - OAuth2 exchange, auth session, riwayat | ✅ backend, belum ada frontend yang memanggilnya |
+| Backend REST sesi (`create_session`/`process_vote`/dst.) + WS hub | ❌ belum ada di repo |
 | Slash command (`/vote`) | ❌ |
 
 ---

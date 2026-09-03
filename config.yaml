@@ -4,9 +4,9 @@
 # ==============================================================================
 
 server:
-  host: "0.0.0.0"
+  host: "0.0.0.0"                     # bind address for the bot's embedded API (/api/*)
   port: 3000
-  base_url: "http://localhost:3000"   # OAuth redirect URI is <base_url>/dashboard
+  base_url: "http://localhost:3000"   # used to build session links in the embed
 
 discord:
   command_prefix: "!vote"

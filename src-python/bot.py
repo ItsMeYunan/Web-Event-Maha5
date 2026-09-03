@@ -12,6 +12,7 @@ from config import load_config
 from listeners.message_listener import MessageVoteListener
 from services.api import BunApiClient
 from services.timer import SessionTimerManager
+from services.webserver import WebServer
 
 logging.basicConfig(
     level=logging.INFO,
@@ -51,14 +52,19 @@ async def main():
             logger.info(f"   • {guild.name} ({guild.id})")
 
     api_client = BunApiClient(config.server.base_url, config.server.admin_key)
+    web_server = WebServer(bot, config)
 
     # aclosing is stdlib and guarantees the httpx pool is released on any exit.
     async with aclosing(api_client), bot:
         vote_cog = VoteCommands(bot, config, api_client, SessionTimerManager())
         await bot.add_cog(vote_cog)
         await bot.add_cog(MessageVoteListener(bot, vote_cog, api_client))
-        logger.info("Menghubungkan ke Discord Gateway...")
-        await bot.start(config.discord.bot_token)
+        await web_server.start()
+        try:
+            logger.info("Menghubungkan ke Discord Gateway...")
+            await bot.start(config.discord.bot_token)
+        finally:
+            await web_server.stop()
 
 
 if __name__ == "__main__":
