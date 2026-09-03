@@ -18,8 +18,8 @@ import secrets
 import time
 from typing import Any, Dict, List, Optional
 
+import aiohttp
 import discord
-import httpx
 from aiohttp import web
 from discord.ext import commands
 
@@ -42,7 +42,7 @@ class WebServer:
         self.config = config
         self._sessions: Dict[str, Dict[str, Any]] = {}
         self._history: List[Dict[str, Any]] = []
-        self._http = httpx.AsyncClient(timeout=10.0)
+        self._http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0))
         self._runner: Optional[web.AppRunner] = None
 
         self.app = web.Application()
@@ -63,7 +63,7 @@ class WebServer:
         logger.info(f"🌐 API server listening on {self.config.server.host}:{self.config.server.port}")
 
     async def stop(self) -> None:
-        await self._http.aclose()
+        await self._http.close()
         if self._runner:
             await self._runner.cleanup()
 
@@ -71,7 +71,9 @@ class WebServer:
 
     async def _exchange_code(self, code: str, redirect_uri: str) -> Dict[str, Any]:
         discord_cfg = self.config.discord
-        response = await self._http.post(
+        # a plain str-value dict is form-encoded (application/x-www-form-urlencoded)
+        # by aiohttp automatically - no manual Content-Type needed.
+        async with self._http.post(
             f"{DISCORD_API}/oauth2/token",
             data={
                 "client_id": discord_cfg.client_id,
@@ -80,19 +82,18 @@ class WebServer:
                 "code": code,
                 "redirect_uri": redirect_uri,
             },
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
-        response.raise_for_status()
-        return response.json()
+        ) as response:
+            response.raise_for_status()
+            return await response.json()
 
     async def _fetch_discord_user(self, access_token: str) -> Dict[str, Any]:
-        response = await self._http.get(
+        async with self._http.get(
             f"{DISCORD_API}/users/@me",
             headers={"Authorization": f"Bearer {access_token}"},
-        )
-        response.raise_for_status()
-        raw = response.json()
-        return {field: raw.get(field) for field in DISCORD_USER_FIELDS}
+        ) as response:
+            response.raise_for_status()
+            raw = await response.json()
+            return {field: raw.get(field) for field in DISCORD_USER_FIELDS}
 
     async def _check_authorized(self, user_id: str) -> bool:
         """Whether this Discord user could run `!vote info` in any guild the
@@ -132,7 +133,7 @@ class WebServer:
         try:
             token_data = await self._exchange_code(code, redirect_uri)
             user = await self._fetch_discord_user(token_data["access_token"])
-        except httpx.HTTPStatusError as e:
+        except aiohttp.ClientResponseError as e:
             logger.warning(f"Discord OAuth2 exchange rejected: {e}")
             return web.json_response({"error": "Kode otorisasi Discord ditolak"}, status=401)
 

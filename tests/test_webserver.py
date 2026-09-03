@@ -54,6 +54,14 @@ async def make_client(bot, cfg):
     return server, client
 
 
+async def close_client(server: WebServer, client: TestClient) -> None:
+    """Test helper: closes both the test HTTP client and the WebServer's own
+    outbound aiohttp session it opened for Discord API calls - without this,
+    aiohttp warns "Unclosed client session" on every test."""
+    await client.close()
+    await server._http.close()
+
+
 @pytest.mark.asyncio
 async def test_auth_discord_exchanges_code_and_grants_authorized_admin(config):
     bot = make_bot(guild_member=make_member(is_admin=True))
@@ -70,7 +78,7 @@ async def test_auth_discord_exchanges_code_and_grants_authorized_admin(config):
         assert body["user"]["id"] == "999"
         assert body["token"]
     finally:
-        await client.close()
+        await close_client(server, client)
 
 
 @pytest.mark.asyncio
@@ -86,7 +94,7 @@ async def test_auth_discord_denies_non_admin(config):
         body = await resp.json()
         assert body["isAuthorized"] is False
     finally:
-        await client.close()
+        await close_client(server, client)
 
 
 @pytest.mark.asyncio
@@ -102,7 +110,7 @@ async def test_auth_discord_treats_member_not_found_as_not_authorized(config):
         body = await resp.json()
         assert body["isAuthorized"] is False
     finally:
-        await client.close()
+        await close_client(server, client)
 
 
 @pytest.mark.asyncio
@@ -116,7 +124,7 @@ async def test_auth_discord_requires_client_credentials():
         )
         assert resp.status == 500
     finally:
-        await client.close()
+        await close_client(server, client)
 
 
 @pytest.mark.asyncio
@@ -134,7 +142,7 @@ async def test_history_requires_authorization(config):
         resp = await client.get("/api/history", headers={"Authorization": "Bearer tok"})
         assert resp.status == 403
     finally:
-        await client.close()
+        await close_client(server, client)
 
 
 @pytest.mark.asyncio
@@ -169,7 +177,7 @@ async def test_history_add_dedupes_by_session_id_and_caps_at_20(config):
         resp = await client.get("/api/history", headers=headers)
         assert await resp.json() == []
     finally:
-        await client.close()
+        await close_client(server, client)
 
 
 @pytest.mark.asyncio
@@ -190,4 +198,4 @@ async def test_session_lookup_round_trips_and_logout_invalidates(config):
         resp = await client.get("/api/auth/session", headers={"Authorization": "Bearer tok"})
         assert resp.status == 401
     finally:
-        await client.close()
+        await close_client(server, client)

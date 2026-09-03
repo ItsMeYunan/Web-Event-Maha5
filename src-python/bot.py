@@ -54,7 +54,7 @@ async def main():
     api_client = BunApiClient(config.server.base_url, config.server.admin_key)
     web_server = WebServer(bot, config)
 
-    # aclosing is stdlib and guarantees the httpx pool is released on any exit.
+    # aclosing is stdlib and guarantees the aiohttp session is released on any exit.
     async with aclosing(api_client), bot:
         vote_cog = VoteCommands(bot, config, api_client, SessionTimerManager())
         await bot.add_cog(vote_cog)

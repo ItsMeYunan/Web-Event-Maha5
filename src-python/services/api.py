@@ -1,30 +1,31 @@
 """Backend API client.
 
-One long-lived httpx.AsyncClient, reused across calls so the connection pool
-actually pools (httpx docs advise against a client per request). Errors are not
-caught here: raise_for_status propagates to the caller, which already reports
-failures to Discord.
+One long-lived aiohttp.ClientSession, reused across calls so the connection
+pool actually pools. Errors are not caught here: raise_for_status propagates
+to the caller, which already reports failures to Discord.
 """
 from typing import Any, Dict, List, Optional
 
-import httpx
+import aiohttp
 
 
 class BunApiClient:
     def __init__(self, base_url: str, admin_key: str, timeout: float = 10.0):
-        self._client = httpx.AsyncClient(
-            base_url=base_url.rstrip("/"),
+        # aiohttp requires base_url to end in "/" - it otherwise raises
+        # ValueError at construction (see ClientSession.__init__).
+        self._session = aiohttp.ClientSession(
+            base_url=base_url.rstrip("/") + "/",
             headers={"Content-Type": "application/json", "X-Admin-Key": admin_key},
-            timeout=timeout,
+            timeout=aiohttp.ClientTimeout(total=timeout),
         )
 
     async def aclose(self) -> None:
-        await self._client.aclose()
+        await self._session.close()
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Dict[str, Any]:
-        response = await self._client.request(method, path, **kwargs)
-        response.raise_for_status()
-        return response.json()
+        async with self._session.request(method, path, **kwargs) as response:
+            response.raise_for_status()
+            return await response.json()
 
     async def create_session(
         self,
