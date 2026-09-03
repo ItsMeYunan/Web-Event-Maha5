@@ -1,0 +1,14 @@
+FROM python:3.14-alpine
+
+WORKDIR /app
+
+COPY src-python/requirements.txt src-python/requirements.txt
+RUN pip install --no-cache-dir -r src-python/requirements.txt
+
+COPY src-python src-python
+COPY config.yaml config.yaml
+
+RUN addgroup -S bot && adduser -S bot -G bot
+USER bot
+
+CMD ["python", "src-python/bot.py"]
