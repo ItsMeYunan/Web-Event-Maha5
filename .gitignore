@@ -42,6 +42,7 @@ pnpm-debug.log*
 bun.lockb
 .DS_Store
 Thumbs.db
+.pytest_cache/
 
 # IDE & Editor files
 .vscode/*
