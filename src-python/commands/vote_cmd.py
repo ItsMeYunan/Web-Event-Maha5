@@ -27,6 +27,18 @@ HELP_COMMANDS = (
 
 DENIED = "❌ **Akses Ditolak:** Anda tidak memiliki izin untuk menjalankan perintah ini."
 
+# Discord's hard limit on a single embed field's value (discord.py's own
+# Embed.add_field docstring: "Can only be up to 1024 characters"); Discord's
+# API rejects the request with a 400 once exceeded, discord.py does not
+# validate this client-side.
+EMBED_FIELD_VALUE_LIMIT = 1024
+
+
+def _candidates_field(candidates: list) -> str:
+    """The candidate-list embed field text - shared by the length guard in
+    initiate() and _session_embed() so they can never drift out of sync."""
+    return "\n".join(f"**[{c['keyCode']}]** {c['name']}" for c in candidates)
+
 class VoteCommands(commands.Cog):
     def __init__(
         self,
@@ -125,8 +137,7 @@ class VoteCommands(commands.Cog):
 
         if channel.id in self.active_sessions:
             await ctx.reply(
-                f"⚠️ Channel {channel.mention} sudah memiliki sesi voting aktif! Hentikan terlebih dahulu dengan `!vote stop {channel.mention}`.",
-                ephemeral=True
+                f"⚠️ Channel {channel.mention} sudah memiliki sesi voting aktif! Hentikan terlebih dahulu dengan `!vote stop {channel.mention}`."
             )
             return
 
@@ -156,6 +167,19 @@ class VoteCommands(commands.Cog):
                 "name": name.strip(),
                 "colorHex": color,
             })
+
+        # Discord rejects the "session started" embed outright once this field
+        # exceeds 1024 chars - checked before any session state is touched, so
+        # a rejected embed can never leave a registered-but-unconfirmed session
+        # with no running timer (channel.send happens after state is set below).
+        field_value = _candidates_field(candidate_payloads)
+        if len(field_value) > EMBED_FIELD_VALUE_LIMIT:
+            await ctx.reply(
+                f"❌ **Error:** Daftar kandidat terlalu panjang untuk satu embed Discord "
+                f"(maksimal {EMBED_FIELD_VALUE_LIMIT} karakter, saat ini {len(field_value)}). "
+                "Kurangi jumlah atau panjang nama kandidat."
+            )
+            return
 
         # Resolve the stage channel this session is bound to. Configured
         # channel wins when set (explicit intent); otherwise fall back to the
@@ -240,8 +264,7 @@ class VoteCommands(commands.Cog):
             color=0x06B6D4,
         )
         for name, value, inline in (
-            ("📋 Daftar Kandidat",
-             "\n".join(f"**[{c['keyCode']}]** {c['name']}" for c in candidates), False),
+            ("📋 Daftar Kandidat", _candidates_field(candidates), False),
             ("⏱️ Durasi", format_duration(duration_secs), True),
             ("📊 Web UI Dashboard", f"[Buka Dashboard]({base}/webui/{session_id})", True),
             ("📺 OBS Overlay", f"[Link Widget]({base}/widget/{session_id})", True),
