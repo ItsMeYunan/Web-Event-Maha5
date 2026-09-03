@@ -11,6 +11,7 @@ export interface Candidate {
   percentage: number;
   latestVoterName?: string;
   latestVoterAvatar?: string;
+  isDark?: boolean;
 }
 
 export interface SessionData {

@@ -1,17 +1,33 @@
-import React from 'react';
+import React, { useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import type { SessionData } from '../lib/types';
-import { CandidateList } from './CandidateList';
+import { CandidateCard } from './CandidateCard';
 
 interface DashboardOverlayProps {
   session: SessionData;
   isSessionEnded?: boolean;
+  sortByRank?: boolean;
 }
 
 export const DashboardOverlay: React.FC<DashboardOverlayProps> = ({
   session,
   isSessionEnded = false,
+  sortByRank = true,
 }) => {
   const isEndingSoon = !isSessionEnded && session.remainingSeconds <= 10 && session.remainingSeconds > 0;
+
+  const sortedCandidates = useMemo(() => {
+    if (!sortByRank) {
+      return session.candidates.map((c, i) => ({ ...c, rank: i + 1 }));
+    }
+    const sorted = [...session.candidates].sort((a, b) => b.votes - a.votes);
+    return sorted.map((c, i) => ({ ...c, rank: i + 1 }));
+  }, [session.candidates, sortByRank]);
+
+  const maxVotes = useMemo(
+    () => Math.max(...session.candidates.map((c) => c.votes), 0),
+    [session.candidates]
+  );
 
   return (
     <div
@@ -89,19 +105,33 @@ export const DashboardOverlay: React.FC<DashboardOverlayProps> = ({
         <span>
           {isSessionEnded
             ? '🔒 Sesi voting telah berakhir · Hasil final telah dikunci'
-            : session.isStageGated
-            ? `🎙️ Voting hanya untuk member di ${session.stageName ?? 'Stage Channel'}`
-            : '🎙️ Voting terbuka untuk seluruh member'}
+            : '🎙️ Voting hanya untuk member di Stage Channel · voice_gate_enabled: true'}
         </span>
       </div>
 
       {/* 3. Candidate Cards (pet-care-dashboard style) with Framer Motion Layout Reordering */}
       <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '12px', position: 'relative' }}>
-        <CandidateList
-          candidates={session.candidates}
-          isSessionEnded={isSessionEnded}
-          gap={12}
-        />
+        <AnimatePresence>
+          {sortedCandidates.map((candidate) => (
+            <motion.div
+              key={candidate.id}
+              layout
+              transition={{
+                type: 'spring',
+                stiffness: 350,
+                damping: 30,
+                mass: 0.8,
+              }}
+              style={{ width: '100%' }}
+            >
+              <CandidateCard
+                candidate={candidate}
+                rank={candidate.rank}
+                isWinner={isSessionEnded && candidate.votes === maxVotes && maxVotes > 0}
+              />
+            </motion.div>
+          ))}
+        </AnimatePresence>
       </div>
 
       {/* 4. Footer Metadata */}

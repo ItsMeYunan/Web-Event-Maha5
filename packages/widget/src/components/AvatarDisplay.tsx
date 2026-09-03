@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
-import { getInitials } from '../lib/color';
 
 interface AvatarDisplayProps {
-  avatarUrl?: string | undefined;
-  name?: string | undefined;
+  avatarUrl?: string;
+  name?: string;
   size?: number;
   className?: string;
 }
@@ -16,7 +15,15 @@ export const AvatarDisplay: React.FC<AvatarDisplayProps> = ({
 }) => {
   const [imgError, setImgError] = useState(false);
 
-  const initials = getInitials(name);
+  // Generate 2-character uppercase initials
+  const initials = React.useMemo(() => {
+    if (!name) return '??';
+    const parts = name.trim().split(/[\s_-]+/);
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[1][0]).toUpperCase();
+    }
+    return name.substring(0, 2).toUpperCase();
+  }, [name]);
 
   if (avatarUrl && !imgError) {
     return (
