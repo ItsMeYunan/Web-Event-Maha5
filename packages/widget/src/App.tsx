@@ -30,6 +30,8 @@ export const App: React.FC = () => {
   const [viewMode, setViewMode] = useState<'widget' | 'dashboard' | 'both'>(getRouteMode());
   const [showFloatingDevTools, setShowFloatingDevTools] = useState(false);
   const [isSessionEnded, setIsSessionEnded] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connecting');
+  const [isLiveSession, setIsLiveSession] = useState(false);
 
   // Initial State matching SDD v1.2.0 spec
   const [session, setSession] = useState<SessionData>({
@@ -104,9 +106,12 @@ export const App: React.FC = () => {
     const wsClient = new LiveVotingWSClient();
     wsClient.connect();
 
+    wsClient.onStatusChange = setConnectionStatus;
+
     wsClient.onInit = (initData) => {
       setSession(initData);
       setIsSessionEnded(initData.status === 'CLOSED');
+      setIsLiveSession(true);
     };
 
     wsClient.onVoteUpdate = (candidates, totalVotes) => {
@@ -310,9 +315,14 @@ export const App: React.FC = () => {
   // 1. Clean OBS Stream Overlay View
   if (viewMode === 'widget') {
     return (
-      <main style={{ width: '100vw', minHeight: '100vh', background: 'transparent', padding: 0 }}>
-        <div style={{ width: '320px', margin: '0 auto', background: 'transparent' }}>
-          <WidgetOverlay session={session} isSessionEnded={isSessionEnded} />
+      <main className="widget-mode">
+        <div className="widget-mode__frame">
+          <WidgetOverlay
+            session={session}
+            isSessionEnded={isSessionEnded}
+            connectionStatus={connectionStatus}
+            isLiveSession={isLiveSession}
+          />
         </div>
         {renderFloatingNav(viewMode, switchView, showFloatingDevTools, setShowFloatingDevTools, {
           handleVote,
@@ -328,27 +338,17 @@ export const App: React.FC = () => {
   // 2. Clean Web UI Dashboard View
   if (viewMode === 'dashboard') {
     return (
-      <main
-        style={{
-          minHeight: '100vh',
-          backgroundColor: '#F8FAFC',
-          color: '#0F172A',
-          padding: '32px 16px',
-          display: 'flex',
-          justifyContent: 'center',
-        }}
-      >
-        <div
-          style={{
-            width: '100%',
-            maxWidth: '800px',
-            backgroundColor: '#FFFFFF',
-            borderRadius: '16px',
-            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.06)',
-            overflow: 'hidden',
-          }}
-        >
-          <DashboardOverlay session={session} isSessionEnded={isSessionEnded} />
+      <main className="uas-page uas-page--dashboard">
+        <header className="uas-brand">
+          <img src="/uas/logo-uas.png" alt="UAS Show, Ujian Antar Streamer" />
+        </header>
+        <div className="uas-board">
+          <DashboardOverlay
+            session={session}
+            isSessionEnded={isSessionEnded}
+            connectionStatus={connectionStatus}
+            isLiveSession={isLiveSession}
+          />
         </div>
         {renderFloatingNav(viewMode, switchView, showFloatingDevTools, setShowFloatingDevTools, {
           handleVote,
@@ -363,81 +363,39 @@ export const App: React.FC = () => {
 
   // 3. Split Showcase View
   return (
-    <main
-      style={{
-        minHeight: '100vh',
-        backgroundColor: '#0B0F19',
-        color: '#F8FAFC',
-        padding: '24px 16px',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-      }}
-    >
-      <div
-        style={{
-          width: '100%',
-          maxWidth: '1200px',
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
-          gap: '24px',
-          marginBottom: '8px',
-        }}
-      >
+    <main className="uas-page uas-page--showcase">
+      <header className="uas-brand uas-brand--compact">
+        <img src="/uas/logo-uas.png" alt="UAS Show, Ujian Antar Streamer" />
+      </header>
+      <div className="uas-showcase">
         {/* Left: Web UI Dashboard */}
-        <section
-          style={{
-            background: '#FFFFFF',
-            color: '#000000',
-            borderRadius: '12px',
-            border: '1px solid #1F2937',
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-          }}
-        >
-          <div
-            style={{
-              background: '#F3F4F6',
-              padding: '10px 16px',
-              fontSize: '13px',
-              fontWeight: 700,
-              color: '#111827',
-              borderBottom: '1px solid #E5E7EB',
-            }}
-          >
-            <span>📊 Web UI Dashboard</span>
+        <section className="uas-showcase__panel uas-showcase__panel--dashboard">
+          <div className="uas-showcase__label">
+            <span>Web UI Dashboard</span>
           </div>
-          <DashboardOverlay session={session} isSessionEnded={isSessionEnded} />
+          <div className="uas-showcase__board">
+            <DashboardOverlay
+              session={session}
+              isSessionEnded={isSessionEnded}
+              connectionStatus={connectionStatus}
+              isLiveSession={isLiveSession}
+              compact
+            />
+          </div>
         </section>
 
         {/* Right: OBS Stream Overlay */}
-        <section
-          style={{
-            background: '#0F172A',
-            borderRadius: '12px',
-            border: '1px solid #1F2937',
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-          }}
-        >
-          <div
-            style={{
-              width: '100%',
-              background: '#1F2937',
-              padding: '10px 16px',
-              fontSize: '13px',
-              fontWeight: 700,
-              color: '#F8FAFC',
-              borderBottom: '1px solid #374151',
-            }}
-          >
-            <span>📺 OBS Stream Overlay</span>
+        <section className="uas-showcase__panel uas-showcase__panel--widget">
+          <div className="uas-showcase__label">
+            <span>OBS Stream Overlay</span>
           </div>
-          <div style={{ padding: '16px', width: '100%', display: 'flex', justifyContent: 'center' }}>
-            <WidgetOverlay session={session} isSessionEnded={isSessionEnded} />
+          <div className="uas-showcase__widget">
+            <WidgetOverlay
+              session={session}
+              isSessionEnded={isSessionEnded}
+              connectionStatus={connectionStatus}
+              isLiveSession={isLiveSession}
+            />
           </div>
         </section>
       </div>
@@ -471,62 +429,37 @@ function renderFloatingNav(
 ) {
   return (
     <>
-      <div
-        style={{
-          position: 'fixed',
-          bottom: '16px',
-          right: '16px',
-          background: 'rgba(15, 23, 42, 0.88)',
-          backdropFilter: 'blur(10px)',
-          border: '1px solid rgba(255, 255, 255, 0.15)',
-          borderRadius: '30px',
-          padding: '6px 10px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-          boxShadow: '0 10px 25px rgba(0, 0, 0, 0.35)',
-          zIndex: 9999,
-          opacity: 0.3,
-          transition: 'opacity 0.2s ease',
-        }}
-        onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
-        onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.3')}
-      >
+      <nav className="floating-nav" aria-label="Tampilan widget">
         <button
-          style={navBtnStyle(viewMode === 'dashboard')}
+          className={`floating-nav__button${viewMode === 'dashboard' ? ' is-active' : ''}`}
           onClick={() => switchView('dashboard')}
         >
-          📊 Web UI
+          Dashboard
         </button>
         <button
-          style={navBtnStyle(viewMode === 'widget')}
+          className={`floating-nav__button${viewMode === 'widget' ? ' is-active' : ''}`}
           onClick={() => switchView('widget')}
         >
-          📺 OBS Widget
-        </button>
-        <button style={navBtnStyle(false)} onClick={() => switchView('both')}>
-          🔀 Split
+          OBS Widget
         </button>
         <button
-          style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '13px' }}
+          className={`floating-nav__button${viewMode === 'both' ? ' is-active' : ''}`}
+          onClick={() => switchView('both')}
+        >
+          Split view
+        </button>
+        <button
           title="Toggle Simulator"
+          aria-expanded={showDev}
+          className="floating-nav__button floating-nav__simulator-toggle"
           onClick={() => setShowDev((prev) => !prev)}
         >
-          ⚙️
+          Simulator
         </button>
-      </div>
+      </nav>
 
       {showDev && (
-        <div
-          style={{
-            position: 'fixed',
-            bottom: '64px',
-            right: '16px',
-            maxWidth: '600px',
-            width: 'calc(100vw - 32px)',
-            zIndex: 9998,
-          }}
-        >
+        <div className="floating-nav__simulator-panel">
           <ControlsPanel
             viewMode={viewMode}
             onVote={actions.handleVote}
@@ -540,17 +473,4 @@ function renderFloatingNav(
       )}
     </>
   );
-}
-
-function navBtnStyle(isActive: boolean): React.CSSProperties {
-  return {
-    background: isActive ? '#0284C7' : 'transparent',
-    color: '#FFFFFF',
-    border: 'none',
-    fontSize: '11px',
-    fontWeight: 700,
-    padding: '5px 10px',
-    borderRadius: '20px',
-    cursor: 'pointer',
-  };
 }

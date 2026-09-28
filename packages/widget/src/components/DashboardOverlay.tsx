@@ -1,154 +1,108 @@
 import React, { useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import type { SessionData } from '../lib/types';
+import type { ConnectionStatus, SessionData } from '../lib/types';
 import { CandidateCard } from './CandidateCard';
+import { StageIndicator } from './StageIndicator';
 
 interface DashboardOverlayProps {
   session: SessionData;
   isSessionEnded?: boolean;
   sortByRank?: boolean;
+  connectionStatus?: ConnectionStatus;
+  isLiveSession?: boolean;
+  compact?: boolean;
 }
 
 export const DashboardOverlay: React.FC<DashboardOverlayProps> = ({
   session,
   isSessionEnded = false,
   sortByRank = true,
+  connectionStatus = 'connecting',
+  isLiveSession = false,
+  compact = false,
 }) => {
   const isEndingSoon = !isSessionEnded && session.remainingSeconds <= 10 && session.remainingSeconds > 0;
 
   const sortedCandidates = useMemo(() => {
     if (!sortByRank) {
-      return session.candidates.map((c, i) => ({ ...c, rank: i + 1 }));
+      return session.candidates.map((candidate, index) => ({ ...candidate, rank: index + 1 }));
     }
-    const sorted = [...session.candidates].sort((a, b) => b.votes - a.votes);
-    return sorted.map((c, i) => ({ ...c, rank: i + 1 }));
+    return [...session.candidates]
+      .sort((first, second) => second.votes - first.votes)
+      .map((candidate, index) => ({ ...candidate, rank: index + 1 }));
   }, [session.candidates, sortByRank]);
 
   const maxVotes = useMemo(
-    () => Math.max(...session.candidates.map((c) => c.votes), 0),
+    () => Math.max(...session.candidates.map((candidate) => candidate.votes), 0),
     [session.candidates]
   );
 
   return (
-    <div
-      style={{
-        width: '100%',
-        maxWidth: '720px',
-        margin: '0 auto',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        padding: '32px 20px',
-        backgroundColor: '#FFFFFF',
-        color: '#0F172A',
-      }}
-    >
-      {/* 1. Large Monospace Countdown Timer */}
-      <div style={{ marginBottom: '6px', textAlign: 'center' }}>
-        {isSessionEnded || session.remainingSeconds <= 0 ? (
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '12px',
-              fontSize: '48px',
-              fontWeight: 900,
-              color: '#DC2626',
-              letterSpacing: '2px',
-              lineHeight: 1,
-            }}
-          >
-            <svg style={{ width: '44px', height: '44px', fill: '#DC2626' }} viewBox="0 0 24 24">
-              <path d="M6 6h12v12H6z" />
-            </svg>
-            <span>VOTING SELESAI</span>
+    <div className={`dashboard-overlay${isEndingSoon ? ' dashboard-overlay--ending' : ''}${compact ? ' dashboard-overlay--compact' : ''}`}>
+      <section className="dashboard-overlay__timer-column" aria-label="Timer sesi voting">
+        <div
+          className={`dashboard-timer${isSessionEnded || isEndingSoon ? ' dashboard-timer--alert' : ''}`}
+          role="timer"
+          aria-label={`Sisa waktu ${session.formattedTime}`}
+        >
+          <span className="dashboard-timer__value">{session.formattedTime}</span>
+          <span className="dashboard-timer__caption">SISA WAKTU</span>
+        </div>
+        <StageIndicator
+          isStageGated={session.isStageGated}
+          stageName={session.stageName}
+          isSessionEnded={isSessionEnded}
+          connectionStatus={connectionStatus}
+          isLiveSession={isLiveSession}
+        />
+      </section>
+
+      <section className="dashboard-overlay__results" aria-labelledby="vote-results-title">
+        <div className="dashboard-results__heading">
+          <h2 id="vote-results-title">Perolehan suara</h2>
+          <span>{session.totalVotes} suara</span>
+        </div>
+        {sortedCandidates.length === 0 ? (
+          <div className="vote-empty-state">
+            <strong>Belum ada kandidat di sesi ini.</strong>
+            <span>Daftar kandidat akan muncul saat sesi voting dimulai.</span>
           </div>
         ) : (
-          <div
-            style={{
-              fontSize: '64px',
-              fontWeight: 900,
-              fontFamily: 'var(--font-mono)',
-              letterSpacing: '4px',
-              lineHeight: 1,
-              color: isEndingSoon ? '#DC2626' : '#0F172A',
-              transition: 'color 0.3s ease',
-              animation: isEndingSoon ? 'vote-pulse 1s infinite alternate ease-in-out' : 'none',
-            }}
-          >
-            {session.formattedTime}
+          <div className="dashboard-results__list">
+            <AnimatePresence initial={false}>
+              {sortedCandidates.map((candidate) => (
+                <motion.div
+                  key={candidate.id}
+                  layout
+                  transition={{ type: 'spring', stiffness: 350, damping: 30, mass: 0.8 }}
+                  className="dashboard-results__item"
+                >
+                  <CandidateCard
+                    candidate={candidate}
+                    rank={candidate.rank}
+                    compact={compact}
+                    isWinner={isSessionEnded && candidate.votes === maxVotes && maxVotes > 0}
+                  />
+                </motion.div>
+              ))}
+            </AnimatePresence>
           </div>
         )}
-      </div>
+      </section>
 
-      {/* 2. Stage Info Banner */}
-      <div
-        style={{
-          fontSize: '13px',
-          fontWeight: 600,
-          color: isSessionEnded ? '#EF4444' : '#64748B',
-          marginBottom: '28px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-        }}
-      >
-        <span
-          style={{
-            width: '8px',
-            height: '8px',
-            borderRadius: '50%',
-            backgroundColor: isSessionEnded ? '#EF4444' : '#10B981',
-            boxShadow: isSessionEnded ? 'none' : '0 0 8px #10B981',
-          }}
-        />
-        <span>
+      <footer className="dashboard-overlay__footer">
+        <span>Mode {session.voteMode}</span>
+        <span className="dashboard-overlay__separator" aria-hidden="true">/</span>
+        <strong className={isSessionEnded ? 'dashboard-overlay__state dashboard-overlay__state--closed' : 'dashboard-overlay__state'}>
           {isSessionEnded
-            ? '🔒 Sesi voting telah berakhir · Hasil final telah dikunci'
-            : '🎙️ Voting hanya untuk member di Stage Channel · voice_gate_enabled: true'}
-        </span>
-      </div>
-
-      {/* 3. Candidate Cards (pet-care-dashboard style) with Framer Motion Layout Reordering */}
-      <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '12px', position: 'relative' }}>
-        <AnimatePresence>
-          {sortedCandidates.map((candidate) => (
-            <motion.div
-              key={candidate.id}
-              layout
-              transition={{
-                type: 'spring',
-                stiffness: 350,
-                damping: 30,
-                mass: 0.8,
-              }}
-              style={{ width: '100%' }}
-            >
-              <CandidateCard
-                candidate={candidate}
-                rank={candidate.rank}
-                isWinner={isSessionEnded && candidate.votes === maxVotes && maxVotes > 0}
-              />
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
-
-      {/* 4. Footer Metadata */}
-      <div
-        style={{
-          marginTop: '28px',
-          fontSize: '13px',
-          color: '#64748B',
-          fontWeight: 600,
-          textAlign: 'center',
-        }}
-      >
-        Total Suara Sah: <strong>{session.totalVotes}</strong> · Mode: {session.voteMode} ·{' '}
-        <span style={{ color: isSessionEnded ? '#EF4444' : '#10B981', fontWeight: 800 }}>
-          {isSessionEnded ? '⏹ CLOSED' : '● ACTIVE'}
-        </span>
-      </div>
+            ? 'SESI DITUTUP'
+            : isLiveSession && connectionStatus === 'connected'
+              ? 'LIVE'
+              : connectionStatus === 'disconnected'
+                ? 'MENYAMBUNG ULANG'
+                : 'PRATINJAU DEMO'}
+        </strong>
+      </footer>
     </div>
   );
 };
