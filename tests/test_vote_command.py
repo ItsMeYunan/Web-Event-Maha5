@@ -1,125 +1,444 @@
+import asyncio
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock
+
 from commands.vote_cmd import VoteCommands
-from listeners.message_listener import MessageVoteListener
-from listeners.reaction_listener import ReactionVoteListener
 from config import AppConfig
-from services.stage_gate import StageGateValidator
+from listeners.message_listener import MessageVoteListener
 from services.timer import SessionTimerManager
 
+
 @pytest.fixture
-def mock_setup():
+def setup():
     bot = MagicMock()
-    bot.user.id = 99999
     config = AppConfig()
-    config.discord.target_stage_channel_id = 12345
     config.discord.voice_gate_enabled = True
-    
-    api_client = MagicMock()
-    api_client.create_session = AsyncMock(return_value={"sessionId": "sess_test_100"})
-    api_client.process_vote = AsyncMock(return_value={"success": True})
-    api_client.stop_session = AsyncMock(return_value={"status": "CLOSED"})
-    api_client.cancel_session = AsyncMock(return_value={"status": "CANCELLED"})
+    config.discord.target_stage_channel_id = 12345
 
-    timer_mgr = SessionTimerManager()
-    stage_gate = StageGateValidator(target_stage_channel_id=12345, voice_gate_enabled=True)
+    api = MagicMock()
+    api.create_session = AsyncMock(return_value={"sessionId": "sess_test_100"})
+    api.process_vote = AsyncMock(return_value={"success": True})
+    api.stop_session = AsyncMock(return_value={"status": "CLOSED"})
+    api.cancel_session = AsyncMock(return_value={"status": "CANCELLED"})
 
-    vote_cog = VoteCommands(bot, config, api_client, timer_mgr)
-    msg_listener = MessageVoteListener(bot, vote_cog, stage_gate, api_client)
-    react_listener = ReactionVoteListener(bot, vote_cog, stage_gate, api_client)
-
+    vote_cog = VoteCommands(bot, config, api, SessionTimerManager())
     return {
-        "bot": bot,
-        "config": config,
-        "api": api_client,
-        "timer_mgr": timer_mgr,
-        "stage_gate": stage_gate,
+        "api": api,
         "vote_cog": vote_cog,
-        "msg_listener": msg_listener,
-        "react_listener": react_listener
+        "msg_listener": MessageVoteListener(bot, vote_cog, api),
     }
 
-@pytest.mark.asyncio
-async def test_vote_initiate_flow(mock_setup):
-    vote_cog = mock_setup["vote_cog"]
-    api = mock_setup["api"]
 
+def register(vote_cog, *, gated=True, keys=("1", "2")):
+    vote_cog.active_sessions[5555] = "sess_test_100"
+    vote_cog.session_meta["sess_test_100"] = {
+        "channel_id": 5555,
+        "keys": set(keys),
+        "stage_channel_id": 12345,
+        "is_gated": gated,
+    }
+
+
+def voter(user_id, voice_channel_id=None):
+    msg = MagicMock()
+    msg.author.bot = False
+    msg.author.id = user_id
+    msg.author.display_name = f"User{user_id}"
+    msg.author.display_avatar.url = "http://avatar.jpg"
+    msg.author.voice = (
+        MagicMock(channel=MagicMock(id=voice_channel_id)) if voice_channel_id else None
+    )
+    msg.channel.id = 5555
+    msg.guild.id = 8888
+    return msg
+
+
+def non_admin_ctx():
+    """A member with no owner status, no permissions, no roles."""
+    ctx = MagicMock()
+    ctx.author.id = 2
+    ctx.guild.owner_id = 1
+    ctx.author.guild_permissions.administrator = False
+    ctx.author.guild_permissions.manage_channels = False
+    ctx.author.guild_permissions.manage_guild = False
+    ctx.author.roles = []
+    ctx.author.top_role = None
+    ctx.guild.get_role = lambda _: None
+    ctx.reply = AsyncMock()
+    return ctx
+
+
+def admin_ctx(stage_id=12345):
     ctx = MagicMock()
     ctx.author.id = 1
-    ctx.guild.owner_id = 1 # Admin
+    ctx.author.voice = None
+    ctx.guild.owner_id = 1
     ctx.guild.id = 8888
+    ctx.guild.get_channel = lambda cid: (
+        MagicMock(id=stage_id, name="live-stage") if stage_id and cid == stage_id else None
+    )
     ctx.reply = AsyncMock()
+    return ctx
 
-    channel = MagicMock()
-    channel.id = 5555
-    channel.mention = "<#5555>"
-    channel.send = AsyncMock(return_value=MagicMock(id=7777))
 
-    await vote_cog.initiate.callback(vote_cog, ctx, channel, "5m", "Alpha", "Bravo", "Charlie")
+def admin_interaction(stage_id=12345):
+    """Mirrors admin_ctx() but for a slash-command Interaction."""
+    interaction = MagicMock()
+    interaction.user.id = 1
+    interaction.user.voice = None
+    interaction.guild.owner_id = 1
+    interaction.guild.id = 8888
+    interaction.guild.get_channel = lambda cid: (
+        MagicMock(id=stage_id, name="live-stage") if stage_id and cid == stage_id else None
+    )
+    interaction.response.send_message = AsyncMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup.send = AsyncMock()
+    return interaction
 
-    # Verify session is registered in active_sessions
-    assert 5555 in vote_cog.active_sessions
-    assert vote_cog.active_sessions[5555] == "sess_test_100"
-    assert api.create_session.called is True
-    assert channel.send.called is True
+
+def non_admin_interaction():
+    interaction = MagicMock()
+    interaction.user.id = 2
+    interaction.user.guild_permissions.administrator = False
+    interaction.user.guild_permissions.manage_channels = False
+    interaction.user.guild_permissions.manage_guild = False
+    interaction.user.roles = []
+    interaction.user.top_role = None
+    interaction.guild.owner_id = 1
+    interaction.guild.get_role = lambda _: None
+    interaction.response.send_message = AsyncMock()
+    return interaction
+
+
+def mentioned_user(user_id, name):
+    """A candidate mentioned via a slash command user option."""
+    member = MagicMock()
+    member.id = user_id
+    member.display_name = name
+    return member
+
 
 @pytest.mark.asyncio
-async def test_chat_vote_ingestion_stage_allowed(mock_setup):
-    msg_listener = mock_setup["msg_listener"]
-    vote_cog = mock_setup["vote_cog"]
-    api = mock_setup["api"]
+async def test_initiate_registers_session(setup):
+    vote_cog, api = setup["vote_cog"], setup["api"]
+    channel = MagicMock(id=5555, mention="<#5555>")
+    channel.send = AsyncMock()
 
-    # Register active session
-    vote_cog.active_sessions[5555] = "sess_test_100"
-    vote_cog.session_meta["sess_test_100"] = {
-        "channel_id": 5555,
-        "candidates": [{"keyCode": "1", "name": "Alpha"}, {"keyCode": "2", "name": "Bravo"}]
-    }
+    await vote_cog.initiate.callback(vote_cog, admin_ctx(), channel, "5m", "Alpha", "Bravo")
 
-    # Message from voter inside stage channel (12345)
-    msg = MagicMock()
-    msg.author.bot = False
-    msg.author.id = 42
-    msg.author.display_name = "StageVoter"
-    msg.author.display_avatar.url = "http://avatar.jpg"
-    msg.author.voice.channel.id = 12345
-    msg.channel.id = 5555
-    msg.content = "1"
-    msg.guild.id = 8888
+    assert vote_cog.active_sessions[5555] == "sess_test_100"
+    assert vote_cog.session_meta["sess_test_100"]["keys"] == {"1", "2"}
+    assert api.create_session.called
+    assert channel.send.called
 
-    await msg_listener.on_message(msg)
 
-    # Verify vote submission
-    api.process_vote.assert_called_once_with(
-        session_id="sess_test_100",
-        user_id="42",
-        username="StageVoter",
-        key_code="1",
-        avatar_url="http://avatar.jpg"
+@pytest.mark.asyncio
+async def test_initiate_rejects_candidate_list_too_long_for_embed_field(setup):
+    """Discord hard-rejects a single embed field over 1024 chars. The guard
+    must catch this before any session state is touched (not after), or a
+    rejected send leaves a registered session with no confirmation and no
+    running timer - !vote stop is the only way out."""
+    vote_cog, api = setup["vote_cog"], setup["api"]
+    channel = MagicMock(id=6666, mention="<#6666>")
+    channel.send = AsyncMock()
+    ctx = admin_ctx()
+    long_candidates = [f"Candidate-{'x' * 60}-{i}" for i in range(20)]  # well over 1024 joined
+
+    await vote_cog.initiate.callback(vote_cog, ctx, channel, "5m", *long_candidates)
+
+    assert 6666 not in vote_cog.active_sessions
+    assert not api.create_session.called
+    assert not channel.send.called
+    reply = ctx.reply.await_args.args[0]
+    assert "1024" in reply
+
+
+@pytest.mark.asyncio
+async def test_slash_initiate_registers_session_from_mentioned_users(setup):
+    vote_cog, api = setup["vote_cog"], setup["api"]
+    interaction = admin_interaction()
+    interaction.channel = MagicMock(id=7777, mention="<#7777>")
+    interaction.channel.send = AsyncMock()
+    alpha, bravo, charlie = mentioned_user(10, "Alpha"), mentioned_user(20, "Bravo"), mentioned_user(30, "Charlie")
+
+    await vote_cog.initiate_slash.callback(
+        vote_cog, interaction, "5m", alpha, bravo, charlie,
+        None, None, None, None, None, None, None,
     )
 
+    assert vote_cog.active_sessions[7777] == "sess_test_100"
+    interaction.response.defer.assert_awaited_once()
+    sent_candidates = api.create_session.await_args.kwargs["candidates"]
+    assert [c["name"] for c in sent_candidates] == ["Alpha", "Bravo", "Charlie"]
+    assert interaction.channel.send.called
+    confirmation = interaction.followup.send.await_args.args[0]
+    assert "sess_test_100" in confirmation
+
+
 @pytest.mark.asyncio
-async def test_chat_vote_ingestion_non_stage_rejected(mock_setup):
-    msg_listener = mock_setup["msg_listener"]
-    vote_cog = mock_setup["vote_cog"]
-    api = mock_setup["api"]
+async def test_slash_initiate_denies_non_admin(setup):
+    vote_cog, api = setup["vote_cog"], setup["api"]
+    interaction = non_admin_interaction()
+    interaction.channel = MagicMock(id=7777, mention="<#7777>")
 
-    vote_cog.active_sessions[5555] = "sess_test_100"
-    vote_cog.session_meta["sess_test_100"] = {
-        "channel_id": 5555,
-        "candidates": [{"keyCode": "1", "name": "Alpha"}]
-    }
+    await vote_cog.initiate_slash.callback(
+        vote_cog, interaction, "5m", mentioned_user(10, "Alpha"), mentioned_user(20, "Bravo"),
+        None, None, None, None, None, None, None, None,
+    )
 
-    # Message from voter NOT in stage
-    msg = MagicMock()
-    msg.author.bot = False
-    msg.author.id = 99
-    msg.author.voice = None # Not in voice
-    msg.channel.id = 5555
+    assert not api.create_session.called
+    reply = interaction.response.send_message.await_args.args[0]
+    assert "Akses Ditolak" in reply
+    assert interaction.response.send_message.await_args.kwargs.get("ephemeral") is True
+
+
+@pytest.mark.asyncio
+async def test_slash_initiate_dedupes_same_user_mentioned_twice(setup):
+    """Discord's picker doesn't stop the same person filling two option
+    slots; that must not count as two distinct candidates."""
+    vote_cog, api = setup["vote_cog"], setup["api"]
+    interaction = admin_interaction()
+    interaction.channel = MagicMock(id=7777, mention="<#7777>")
+    same_user = mentioned_user(10, "Alpha")
+
+    await vote_cog.initiate_slash.callback(
+        vote_cog, interaction, "5m", same_user, same_user,
+        None, None, None, None, None, None, None, None,
+    )
+
+    assert not api.create_session.called
+    reply = interaction.response.send_message.await_args.args[0]
+    assert "minimal 2 kandidat" in reply
+    assert interaction.response.send_message.await_args.kwargs.get("ephemeral") is True
+
+
+@pytest.mark.asyncio
+async def test_slash_initiate_rejects_channel_with_active_session(setup):
+    vote_cog, api = setup["vote_cog"], setup["api"]
+    register(vote_cog)                     # channel 5555 already has sess_test_100
+    interaction = admin_interaction()
+    interaction.channel = MagicMock(id=5555, mention="<#5555>")
+
+    await vote_cog.initiate_slash.callback(
+        vote_cog, interaction, "5m", mentioned_user(10, "Alpha"), mentioned_user(20, "Bravo"),
+        None, None, None, None, None, None, None, None,
+    )
+
+    assert not api.create_session.called
+    reply = interaction.response.send_message.await_args.args[0]
+    assert "sudah memiliki sesi voting aktif" in reply
+
+
+
+@pytest.mark.asyncio
+async def test_vote_from_stage_is_submitted(setup):
+    register(setup["vote_cog"])
+    msg = voter(42, voice_channel_id=12345)
     msg.content = "1"
-    msg.guild.id = 8888
 
-    await msg_listener.on_message(msg)
+    await setup["msg_listener"].on_message(msg)
 
-    # API must NOT be called
-    api.process_vote.assert_not_called()
+    setup["api"].process_vote.assert_called_once_with(
+        session_id="sess_test_100", user_id="42", username="User42",
+        key_code="1", avatar_url="http://avatar.jpg",
+    )
+
+
+@pytest.mark.asyncio
+async def test_vote_from_outside_stage_is_rejected(setup):
+    register(setup["vote_cog"])
+    msg = voter(99)
+    msg.content = "1"
+
+    await setup["msg_listener"].on_message(msg)
+    setup["api"].process_vote.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_unknown_candidate_number_is_ignored(setup):
+    register(setup["vote_cog"], keys=("1", "2"))
+    msg = voter(42, voice_channel_id=12345)
+    msg.content = "9"
+
+    await setup["msg_listener"].on_message(msg)
+    setup["api"].process_vote.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ungated_session_accepts_a_voter_outside_voice(setup):
+    register(setup["vote_cog"], gated=False)
+    msg = voter(77)
+    msg.content = "2"
+
+    await setup["msg_listener"].on_message(msg)
+    assert setup["api"].process_vote.called
+
+
+@pytest.mark.asyncio
+async def test_stop_finalises_and_clears_the_session(setup):
+    vote_cog, api = setup["vote_cog"], setup["api"]
+    register(vote_cog)
+    channel = MagicMock(id=5555, mention="<#5555>")
+    channel.send = AsyncMock()
+
+    await vote_cog.stop.callback(vote_cog, admin_ctx(), channel)
+
+    api.stop_session.assert_awaited_once_with("sess_test_100")
+    assert 5555 not in vote_cog.active_sessions
+    assert "sess_test_100" not in vote_cog.session_meta
+
+
+@pytest.mark.asyncio
+async def test_cancel_uses_the_cancel_endpoint(setup):
+    vote_cog, api = setup["vote_cog"], setup["api"]
+    register(vote_cog)
+    channel = MagicMock(id=5555, mention="<#5555>")
+    channel.send = AsyncMock()
+
+    await vote_cog.cancel.callback(vote_cog, admin_ctx(), channel)
+
+    api.cancel_session.assert_awaited_once_with("sess_test_100")
+    api.stop_session.assert_not_called()
+    assert 5555 not in vote_cog.active_sessions
+
+
+@pytest.mark.asyncio
+async def test_non_admin_cannot_stop(setup):
+    vote_cog, api = setup["vote_cog"], setup["api"]
+    register(vote_cog)
+
+    ctx = non_admin_ctx()
+    channel = MagicMock(id=5555, mention="<#5555>")
+    channel.send = AsyncMock()
+
+    await vote_cog.stop.callback(vote_cog, ctx, channel)
+
+    api.stop_session.assert_not_called()
+    assert 5555 in vote_cog.active_sessions    # session survives a rejected stop
+
+
+@pytest.mark.asyncio
+async def test_initiate_without_channel_uses_the_current_one(setup):
+    """!vote initiate 5m Alpha Bravo -> runs in the channel the command came from."""
+    vote_cog = setup["vote_cog"]
+    ctx = admin_ctx()
+    ctx.channel = MagicMock(id=4242, mention="<#4242>")
+    ctx.channel.send = AsyncMock()
+
+    await vote_cog.initiate.callback(vote_cog, ctx, None, "5m", "Alpha", "Bravo")
+
+    assert vote_cog.active_sessions[4242] == "sess_test_100"
+    assert ctx.channel.send.called          # embed went to the invoking channel
+
+
+@pytest.mark.asyncio
+async def test_votes_only_count_in_the_session_channel(setup):
+    """A message in another channel finds no session, so it can never vote."""
+    register(setup["vote_cog"])            # session lives on channel 5555
+    msg = voter(42, voice_channel_id=12345)
+    msg.content = "1"
+    msg.channel.id = 6666                  # different channel
+
+    await setup["msg_listener"].on_message(msg)
+    setup["api"].process_vote.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_voting_from_an_unrelated_voice_channel_is_rejected(setup):
+    """Joining any other voice channel must not satisfy the stage gate."""
+    register(setup["vote_cog"])
+    msg = voter(42, voice_channel_id=99999)   # some other/private channel
+    msg.content = "1"
+
+    await setup["msg_listener"].on_message(msg)
+    setup["api"].process_vote.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_gated_initiate_fails_closed_when_no_stage_is_found(setup):
+    """Gating on with no resolvable stage must refuse, not open the vote up."""
+    vote_cog, api = setup["vote_cog"], setup["api"]
+    vote_cog.config.discord.target_stage_channel_id = None   # nothing configured
+
+    ctx = admin_ctx(stage_id=None)
+    ctx.author.voice = None                                   # admin not in voice
+    channel = MagicMock(id=5555, mention="<#5555>")
+    channel.send = AsyncMock()
+
+    await vote_cog.initiate.callback(vote_cog, ctx, channel, "5m", "Alpha", "Bravo")
+
+    api.create_session.assert_not_called()
+    assert 5555 not in vote_cog.active_sessions
+
+
+@pytest.mark.asyncio
+async def test_stage_falls_back_to_the_admins_voice_channel(setup):
+    """No configured stage -> bind to wherever the initiating admin is."""
+    vote_cog = setup["vote_cog"]
+    vote_cog.config.discord.target_stage_channel_id = None
+
+    ctx = admin_ctx(stage_id=None)
+    ctx.author.voice = MagicMock(channel=MagicMock(id=777, name="stage-live"))
+    channel = MagicMock(id=5555, mention="<#5555>")
+    channel.send = AsyncMock()
+
+    await vote_cog.initiate.callback(vote_cog, ctx, channel, "5m", "Alpha", "Bravo")
+
+    assert vote_cog.session_meta["sess_test_100"]["stage_channel_id"] == 777
+
+
+@pytest.mark.asyncio
+async def test_expiry_finalises_even_when_the_backend_awaits(setup):
+    """The timer calls _close from inside its own task. Uses a real await point
+    because AsyncMock never suspends and so would hide a self-cancel."""
+    vote_cog = setup["vote_cog"]
+    register(vote_cog)
+    completed = {"stop": False}
+
+    async def slow_stop(session_id):
+        await asyncio.sleep(0.05)          # real suspension, like real HTTP
+        completed["stop"] = True
+        return {}
+
+    vote_cog.api.stop_session = slow_stop
+    channel = MagicMock(id=5555, mention="<#5555>")
+    channel.send = AsyncMock()
+
+    async def on_expire(session_id):
+        await vote_cog._handle_auto_stop(session_id, channel)
+
+    vote_cog.timer_mgr.start_timer("sess_test_100", 1, on_expire=on_expire)
+    await asyncio.sleep(1.4)
+
+    assert completed["stop"] is True, "backend never told the session ended"
+    assert channel.send.called, "final results were never posted"
+    assert 5555 not in vote_cog.active_sessions
+
+
+@pytest.mark.asyncio
+async def test_info_is_refused_for_non_admins(setup):
+    vote_cog = setup["vote_cog"]
+    ctx = non_admin_ctx()
+
+    await vote_cog.info.callback(vote_cog, ctx)
+
+    reply = ctx.reply.await_args.args[0]
+    assert "Akses Ditolak" in reply
+    assert ctx.reply.await_args.kwargs.get("embed") is None
+
+
+@pytest.mark.asyncio
+async def test_info_never_renders_key_material(setup):
+    vote_cog = setup["vote_cog"]
+    vote_cog.config.server.admin_key = "super-secret-value"
+    ctx = admin_ctx()
+    ctx.guild.name = "Guild"
+
+    await vote_cog.info.callback(vote_cog, ctx)
+
+    embed = ctx.reply.await_args.kwargs["embed"]
+    rendered = " ".join(f"{f.name} {f.value}" for f in embed.fields)
+    assert "super-secret-value" not in rendered
+    assert "secret" not in rendered.lower()
+    assert "Tersimpan" in rendered            # presence only, never the value

@@ -26,3 +26,11 @@ def test_format_durations():
     assert format_duration(272) == "04:32"
     assert format_duration(3665) == "01:01:05"
     assert format_duration(0) == "00:00"
+
+
+def test_non_string_raises_valueerror_not_attributeerror():
+    # the caller only catches ValueError, so a stray non-str must not escape as
+    # AttributeError and kill the command handler
+    for bad in (300, 3.5, None, [], {}):
+        with pytest.raises(ValueError):
+            parse_duration(bad)
