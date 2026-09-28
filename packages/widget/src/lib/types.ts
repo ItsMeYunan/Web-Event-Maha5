@@ -29,6 +29,10 @@ export interface SessionData {
   candidates: Candidate[];
 }
 
+export type ConnectionStatus = 'connected' | 'disconnected' | 'connecting';
+
+export type ViewMode = 'widget' | 'dashboard' | 'cagak' | 'both';
+
 export type WSEvent = 
   | { event: 'INIT'; data: SessionData }
   | { event: 'VOTE_UPDATE'; data: { sessionId: string; candidateId: string; totalSessionVotes: number; candidates: Candidate[]; log?: { username: string; candidateName: string; keyCode: string; timestamp: string } } }

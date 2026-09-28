@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: 'Barlow Condensed', Impact, 'Arial Narrow', sans-serif;
+  --font-interface: 'DM Sans', 'Trebuchet MS', sans-serif;
+  --color-ink: #21100b;
+  --color-wine: #510a0e;
+  --color-wine-deep: #220709;
+  --color-red: #e61e2c;
+  --color-gold: #f5d640;
+  --color-gold-deep: #8a4814;
+  --color-paper: #fff6d8;
+  --color-muted: #6e4635;
+  --color-alert: #c3131d;
+  --color-live: #2d6937;
+  --color-reconnecting: #9c4d12;
+  --color-rule: rgba(255, 226, 139, 0.5);
+  --color-dark-wash: rgba(23, 5, 6, 0.45);
+  --color-stage-wash: rgba(23, 5, 6, 0.2);
+  --spacing-1: 4px;
+  --spacing-2: 8px;
+  --spacing-3: 12px;
+  --spacing-4: 18px;
+  --spacing-5: 26px;
+  --radius-board: 8px;
+  --radius-row: 4px;
+}
+
+@layer base {
+  html {
+    @apply min-w-[320px] overflow-x-hidden;
+    scroll-padding-bottom: 96px;
+  }
+
+  body {
+    @apply min-h-screen min-w-[320px] bg-transparent font-interface text-paper antialiased;
+  }
+
+  #root {
+    @apply min-h-screen;
+  }
+
+  button {
+    @apply min-h-11 cursor-pointer;
+    font: inherit;
+  }
+
+  button:focus-visible {
+    @apply outline-[3px] outline-gold outline-offset-[3px];
+  }
+}
+
+@keyframes vote-pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.025); }
+  100% { transform: scale(1); }
+}
+
+.pulse-anim {
+  animation: vote-pulse 250ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.cagak-results-list {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.cagak-results-list::-webkit-scrollbar {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

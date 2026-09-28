@@ -1,17 +1,21 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { SessionData } from './lib/types';
+import type { SessionData, ViewMode } from './lib/types';
 import { LiveVotingWSClient } from './lib/ws';
 import { WidgetOverlay } from './components/WidgetOverlay';
 import { DashboardOverlay } from './components/DashboardOverlay';
+import { CagakOverlay } from './components/CagakOverlay';
 import { ControlsPanel } from './components/ControlsPanel';
 
-function getRouteMode(): 'widget' | 'dashboard' | 'both' {
+function getRouteMode(): ViewMode {
   if (typeof window === 'undefined') return 'both';
   const path = window.location.pathname.toLowerCase();
   const hash = window.location.hash.toLowerCase();
   const params = new URLSearchParams(window.location.search);
   const viewQuery = params.get('view')?.toLowerCase();
 
+  if (path.startsWith('/cagak') || hash.includes('cagak') || viewQuery === 'cagak') {
+    return 'cagak';
+  }
   if (path.startsWith('/widget') || hash.includes('widget') || viewQuery === 'widget') {
     return 'widget';
   }
@@ -27,9 +31,11 @@ function getRouteMode(): 'widget' | 'dashboard' | 'both' {
 }
 
 export const App: React.FC = () => {
-  const [viewMode, setViewMode] = useState<'widget' | 'dashboard' | 'both'>(getRouteMode());
+  const [viewMode, setViewMode] = useState<ViewMode>(getRouteMode());
   const [showFloatingDevTools, setShowFloatingDevTools] = useState(false);
   const [isSessionEnded, setIsSessionEnded] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connecting');
+  const [isLiveSession, setIsLiveSession] = useState(false);
 
   // Initial State matching SDD v1.2.0 spec
   const [session, setSession] = useState<SessionData>({
@@ -104,9 +110,12 @@ export const App: React.FC = () => {
     const wsClient = new LiveVotingWSClient();
     wsClient.connect();
 
+    wsClient.onStatusChange = setConnectionStatus;
+
     wsClient.onInit = (initData) => {
       setSession(initData);
       setIsSessionEnded(initData.status === 'CLOSED');
+      setIsLiveSession(true);
     };
 
     wsClient.onVoteUpdate = (candidates, totalVotes) => {
@@ -297,9 +306,9 @@ export const App: React.FC = () => {
     });
   }, []);
 
-  const switchView = useCallback((mode: 'widget' | 'dashboard' | 'both') => {
+  const switchView = useCallback((mode: ViewMode) => {
     setViewMode(mode);
-    const url = mode === 'widget' ? '/widget' : mode === 'dashboard' ? '/webui' : '/';
+    const url = mode === 'widget' ? '/widget' : mode === 'dashboard' ? '/webui' : mode === 'cagak' ? '/cagak' : '/';
     if (window.history.pushState) {
       window.history.pushState(null, '', url);
     } else {
@@ -310,9 +319,36 @@ export const App: React.FC = () => {
   // 1. Clean OBS Stream Overlay View
   if (viewMode === 'widget') {
     return (
-      <main style={{ width: '100vw', minHeight: '100vh', background: 'transparent', padding: 0 }}>
-        <div style={{ width: '320px', margin: '0 auto', background: 'transparent' }}>
-          <WidgetOverlay session={session} isSessionEnded={isSessionEnded} />
+      <main className="w-screen min-h-screen bg-transparent pb-[84px]">
+        <div className="mx-auto w-[min(320px,100vw)] bg-transparent">
+          <WidgetOverlay
+            session={session}
+            isSessionEnded={isSessionEnded}
+            connectionStatus={connectionStatus}
+            isLiveSession={isLiveSession}
+          />
+        </div>
+        {renderFloatingNav(viewMode, switchView, showFloatingDevTools, setShowFloatingDevTools, {
+          handleVote,
+          handleToggleTimer,
+          handleTestEnding,
+          handleSessionEnd,
+          handleReset,
+        })}
+      </main>
+    );
+  }
+
+  if (viewMode === 'cagak') {
+    return (
+      <main className="grid h-svh min-h-[320px] w-screen place-items-center overflow-hidden bg-transparent">
+        <div className="@container/cagak relative aspect-[3602/3676] w-[min(100vw,98svh)] shrink-0">
+          <CagakOverlay
+            session={session}
+            isSessionEnded={isSessionEnded}
+            connectionStatus={connectionStatus}
+            isLiveSession={isLiveSession}
+          />
         </div>
         {renderFloatingNav(viewMode, switchView, showFloatingDevTools, setShowFloatingDevTools, {
           handleVote,
@@ -328,27 +364,17 @@ export const App: React.FC = () => {
   // 2. Clean Web UI Dashboard View
   if (viewMode === 'dashboard') {
     return (
-      <main
-        style={{
-          minHeight: '100vh',
-          backgroundColor: '#F8FAFC',
-          color: '#0F172A',
-          padding: '32px 16px',
-          display: 'flex',
-          justifyContent: 'center',
-        }}
-      >
-        <div
-          style={{
-            width: '100%',
-            maxWidth: '800px',
-            backgroundColor: '#FFFFFF',
-            borderRadius: '16px',
-            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.06)',
-            overflow: 'hidden',
-          }}
-        >
-          <DashboardOverlay session={session} isSessionEnded={isSessionEnded} />
+      <main className="relative isolate flex min-h-screen w-full flex-col items-center overflow-x-clip bg-wine-deep px-[clamp(12px,3vw,42px)] pt-[10px] pb-[104px] text-paper bg-[linear-gradient(var(--color-stage-wash),var(--color-dark-wash)),url('/uas/background-stage.png')] bg-center bg-cover bg-no-repeat max-[720px]:px-[10px] max-[460px]:pt-[6px]">
+        <header className="mx-auto mb-[clamp(8px,1.4vh,16px)] flex w-full justify-center p-0 max-[460px]:mb-[5px]">
+          <img className="block max-h-[22vh] w-[clamp(220px,24vw,350px)] object-contain drop-shadow-[0_7px_12px_var(--color-wine-deep)] max-[720px]:max-h-none max-[720px]:w-[min(245px,70vw)] max-[460px]:w-[min(210px,62vw)]" src="/uas/logo-uas.png" alt="UAS Show, Ujian Antar Streamer" />
+        </header>
+        <div className="mx-auto flex aspect-[3237/1851] w-[min(1080px,100%)] items-center justify-center bg-[url('/uas/papan.png')] bg-center bg-no-repeat bg-[length:100%_100%] px-[6.2%] pt-[5.2%] pb-[4%] max-[720px]:aspect-[2698/3164] max-[720px]:w-[min(440px,100%)] max-[720px]:bg-[url('/uas/papan-vote.png')] max-[720px]:px-[8%] max-[720px]:pt-[9%] max-[720px]:pb-[6%]">
+          <DashboardOverlay
+            session={session}
+            isSessionEnded={isSessionEnded}
+            connectionStatus={connectionStatus}
+            isLiveSession={isLiveSession}
+          />
         </div>
         {renderFloatingNav(viewMode, switchView, showFloatingDevTools, setShowFloatingDevTools, {
           handleVote,
@@ -363,81 +389,39 @@ export const App: React.FC = () => {
 
   // 3. Split Showcase View
   return (
-    <main
-      style={{
-        minHeight: '100vh',
-        backgroundColor: '#0B0F19',
-        color: '#F8FAFC',
-        padding: '24px 16px',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-      }}
-    >
-      <div
-        style={{
-          width: '100%',
-          maxWidth: '1200px',
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
-          gap: '24px',
-          marginBottom: '8px',
-        }}
-      >
+    <main className="relative isolate min-h-screen overflow-x-clip bg-wine-deep px-[clamp(12px,3vw,42px)] pt-[10px] pb-[104px] text-paper [background-image:linear-gradient(var(--color-dark-wash),var(--color-dark-wash)),url('/uas/background-batik.png')] [background-position:center,center] [background-size:auto,min(900px,100vw)_auto] [background-repeat:no-repeat,repeat] max-[720px]:px-[10px] max-[460px]:px-[10px] max-[460px]:pt-[6px]">
+      <header className="mx-auto mb-2 flex w-full justify-center p-0 max-[460px]:mb-[5px]">
+        <img className="block max-h-[16vh] w-[clamp(175px,18vw,240px)] object-contain drop-shadow-[0_7px_12px_var(--color-wine-deep)] max-[820px]:w-[205px] max-[720px]:max-h-none max-[720px]:w-[min(245px,70vw)] max-[460px]:w-[min(210px,62vw)]" src="/uas/logo-uas.png" alt="UAS Show, Ujian Antar Streamer" />
+      </header>
+      <div className="mx-auto grid w-[min(1380px,100%)] grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)] items-stretch gap-[clamp(12px,2vw,24px)] max-[940px]:max-w-[660px] max-[940px]:grid-cols-[minmax(0,1fr)]">
         {/* Left: Web UI Dashboard */}
-        <section
-          style={{
-            background: '#FFFFFF',
-            color: '#000000',
-            borderRadius: '12px',
-            border: '1px solid #1F2937',
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-          }}
-        >
-          <div
-            style={{
-              background: '#F3F4F6',
-              padding: '10px 16px',
-              fontSize: '13px',
-              fontWeight: 700,
-              color: '#111827',
-              borderBottom: '1px solid #E5E7EB',
-            }}
-          >
-            <span>📊 Web UI Dashboard</span>
+        <section className="flex min-w-0 flex-col">
+          <div className="min-h-10 border-b-2 border-red px-[10px] pt-[6px] pb-2 font-display text-xl font-bold uppercase leading-[1.15] text-paper">
+            <span>Web UI Dashboard</span>
           </div>
-          <DashboardOverlay session={session} isSessionEnded={isSessionEnded} />
+          <div className="mx-auto flex aspect-[3237/1851] w-full items-center justify-center bg-[url('/uas/papan.png')] bg-center bg-no-repeat bg-[length:100%_100%] px-[6.2%] pt-[5.4%] pb-[4%] max-[720px]:aspect-[2698/3164] max-[720px]:w-[min(440px,100%)] max-[720px]:bg-[url('/uas/papan-vote.png')] max-[720px]:px-[8%] max-[720px]:pt-[9%] max-[720px]:pb-[6%]">
+            <DashboardOverlay
+              session={session}
+              isSessionEnded={isSessionEnded}
+              connectionStatus={connectionStatus}
+              isLiveSession={isLiveSession}
+              compact
+            />
+          </div>
         </section>
 
         {/* Right: OBS Stream Overlay */}
-        <section
-          style={{
-            background: '#0F172A',
-            borderRadius: '12px',
-            border: '1px solid #1F2937',
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-          }}
-        >
-          <div
-            style={{
-              width: '100%',
-              background: '#1F2937',
-              padding: '10px 16px',
-              fontSize: '13px',
-              fontWeight: 700,
-              color: '#F8FAFC',
-              borderBottom: '1px solid #374151',
-            }}
-          >
-            <span>📺 OBS Stream Overlay</span>
+        <section className="flex min-w-0 flex-col">
+          <div className="mt-2 min-h-10 border-b-2 border-red px-[10px] pt-[6px] pb-2 font-display text-xl font-bold uppercase leading-[1.15] text-paper max-[940px]:mt-0">
+            <span>OBS Stream Overlay</span>
           </div>
-          <div style={{ padding: '16px', width: '100%', display: 'flex', justifyContent: 'center' }}>
-            <WidgetOverlay session={session} isSessionEnded={isSessionEnded} />
+          <div className="flex w-full justify-center pt-2 max-[820px]:pt-2.5">
+            <WidgetOverlay
+              session={session}
+              isSessionEnded={isSessionEnded}
+              connectionStatus={connectionStatus}
+              isLiveSession={isLiveSession}
+            />
           </div>
         </section>
       </div>
@@ -457,8 +441,8 @@ export const App: React.FC = () => {
 };
 
 function renderFloatingNav(
-  viewMode: 'widget' | 'dashboard' | 'both',
-  switchView: (mode: 'widget' | 'dashboard' | 'both') => void,
+  viewMode: ViewMode,
+  switchView: (mode: ViewMode) => void,
   showDev: boolean,
   setShowDev: React.Dispatch<React.SetStateAction<boolean>>,
   actions: {
@@ -469,64 +453,48 @@ function renderFloatingNav(
     handleReset: () => void;
   }
 ) {
+  const navButtonClass = (isActive: boolean) =>
+    `min-w-[82px] rounded-[3px] border px-[10px] py-[6px] text-[11px] font-bold text-paper max-[720px]:min-w-0 max-[720px]:px-1 max-[720px]:text-[10px] ${isActive ? 'border-gold bg-red' : 'border-transparent bg-transparent hover:border-gold hover:bg-red'}`;
+
   return (
     <>
-      <div
-        style={{
-          position: 'fixed',
-          bottom: '16px',
-          right: '16px',
-          background: 'rgba(15, 23, 42, 0.88)',
-          backdropFilter: 'blur(10px)',
-          border: '1px solid rgba(255, 255, 255, 0.15)',
-          borderRadius: '30px',
-          padding: '6px 10px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-          boxShadow: '0 10px 25px rgba(0, 0, 0, 0.35)',
-          zIndex: 9999,
-          opacity: 0.3,
-          transition: 'opacity 0.2s ease',
-        }}
-        onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
-        onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.3')}
-      >
+      <nav className="fixed right-4 bottom-4 z-[9999] grid grid-cols-[repeat(5,auto)] gap-1 rounded-[5px] border border-gold-deep bg-wine-deep p-[5px] max-[720px]:right-2 max-[720px]:bottom-[calc(8px+env(safe-area-inset-bottom))] max-[720px]:left-2 max-[720px]:grid-cols-[repeat(5,minmax(0,1fr))] max-[720px]:gap-[3px] max-[720px]:p-1" aria-label="Tampilan widget">
         <button
-          style={navBtnStyle(viewMode === 'dashboard')}
+          className={navButtonClass(viewMode === 'dashboard')}
           onClick={() => switchView('dashboard')}
         >
-          📊 Web UI
+          Dashboard
         </button>
         <button
-          style={navBtnStyle(viewMode === 'widget')}
+          className={navButtonClass(viewMode === 'cagak')}
+          onClick={() => switchView('cagak')}
+        >
+          CAGAK
+        </button>
+        <button
+          className={navButtonClass(viewMode === 'widget')}
           onClick={() => switchView('widget')}
         >
-          📺 OBS Widget
-        </button>
-        <button style={navBtnStyle(false)} onClick={() => switchView('both')}>
-          🔀 Split
+          OBS Widget
         </button>
         <button
-          style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '13px' }}
+          className={navButtonClass(viewMode === 'both')}
+          onClick={() => switchView('both')}
+        >
+          Split view
+        </button>
+        <button
           title="Toggle Simulator"
+          aria-expanded={showDev}
+          className="min-w-[82px] rounded-[3px] border border-transparent bg-transparent px-[10px] py-[6px] text-[11px] font-bold text-paper hover:border-gold hover:bg-red max-[720px]:min-w-0 max-[720px]:px-1 max-[720px]:text-[10px]"
           onClick={() => setShowDev((prev) => !prev)}
         >
-          ⚙️
+          Simulator
         </button>
-      </div>
+      </nav>
 
       {showDev && (
-        <div
-          style={{
-            position: 'fixed',
-            bottom: '64px',
-            right: '16px',
-            maxWidth: '600px',
-            width: 'calc(100vw - 32px)',
-            zIndex: 9998,
-          }}
-        >
+        <div className="fixed right-4 bottom-[74px] z-[9998] w-[min(600px,calc(100vw-32px))] max-[720px]:right-2 max-[720px]:bottom-[calc(64px+env(safe-area-inset-bottom))] max-[720px]:w-[calc(100vw-16px)]">
           <ControlsPanel
             viewMode={viewMode}
             onVote={actions.handleVote}
@@ -540,17 +508,4 @@ function renderFloatingNav(
       )}
     </>
   );
-}
-
-function navBtnStyle(isActive: boolean): React.CSSProperties {
-  return {
-    background: isActive ? '#0284C7' : 'transparent',
-    color: '#FFFFFF',
-    border: 'none',
-    fontSize: '11px',
-    fontWeight: 700,
-    padding: '5px 10px',
-    borderRadius: '20px',
-    cursor: 'pointer',
-  };
 }

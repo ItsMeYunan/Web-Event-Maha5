@@ -1,51 +1,45 @@
 import React from 'react';
+import type { ConnectionStatus } from '../lib/types';
 
 interface StageIndicatorProps {
   isStageGated?: boolean;
   stageName?: string;
   isSessionEnded?: boolean;
+  connectionStatus?: ConnectionStatus;
+  isLiveSession?: boolean;
 }
 
 export const StageIndicator: React.FC<StageIndicatorProps> = ({
   isStageGated = false,
   stageName = '#live-stage',
   isSessionEnded = false,
+  connectionStatus = 'connecting',
+  isLiveSession = false,
 }) => {
+  const isLive = isLiveSession && connectionStatus === 'connected';
+  const stateColor = isSessionEnded
+    ? 'text-[#ffc1bd]'
+    : isLive
+      ? 'text-[#d5f1c6]'
+      : connectionStatus === 'disconnected'
+        ? 'text-[#ffd09e]'
+        : 'text-gold';
+  const statusText = isSessionEnded
+    ? 'Sesi voting ditutup'
+    : isLive
+      ? isStageGated
+        ? `Stage gated · ${stageName}`
+        : 'Voting terbuka'
+      : connectionStatus === 'disconnected'
+        ? isLiveSession
+          ? 'Koneksi terputus · data terakhir'
+          : 'DEMO · server terputus'
+        : 'Pratinjau demo · menunggu sesi live';
+
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: '6px',
-        fontSize: '11px',
-        fontWeight: 700,
-        letterSpacing: '0.4px',
-        padding: '5px 12px',
-        borderRadius: '20px',
-        background: 'rgba(0, 0, 0, 0.45)',
-        backdropFilter: 'blur(6px)',
-        border: '1px solid rgba(255, 255, 255, 0.1)',
-        color: isSessionEnded ? '#EF4444' : isStageGated ? '#10B981' : '#94A3B8',
-        userSelect: 'none',
-      }}
-    >
-      <span
-        style={{
-          width: '6px',
-          height: '6px',
-          borderRadius: '50%',
-          backgroundColor: isSessionEnded ? '#EF4444' : isStageGated ? '#10B981' : '#94A3B8',
-          boxShadow: isSessionEnded ? 'none' : isStageGated ? '0 0 8px #10B981' : 'none',
-        }}
-      />
-      <span>
-        {isSessionEnded
-          ? '🔒 HASIL FINAL TERKUNCI'
-          : isStageGated
-          ? `Stage Gated · ${stageName}`
-          : 'Voting Terbuka'}
-      </span>
+    <div className={`flex w-full min-w-0 items-start gap-[7px] border-l-[3px] border-current bg-wine-deep px-2 py-[6px] text-[11px] font-semibold leading-[1.35] ${stateColor}`} role="status" aria-live="polite">
+      <span className="mt-[3px] block h-2 w-2 flex-none border border-current bg-current" aria-hidden="true" />
+      <span>{statusText}</span>
     </div>
   );
 };

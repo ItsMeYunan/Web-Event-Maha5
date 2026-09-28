@@ -27,22 +27,15 @@ export const AvatarDisplay: React.FC<AvatarDisplayProps> = ({
 
   if (avatarUrl && !imgError) {
     return (
-      <div 
-        className={`avatar-wrapper ${className}`} 
-        style={{ width: size, height: size, flexShrink: 0, position: 'relative' }}
+      <div
+        className={`relative shrink-0 ${className}`}
+        style={{ width: size, height: size }}
       >
         <img
           src={avatarUrl}
           alt={name}
           onError={() => setImgError(true)}
-          style={{
-            width: size,
-            height: size,
-            borderRadius: '50%',
-            objectFit: 'cover',
-            border: '2px solid rgba(255, 255, 255, 0.65)',
-            display: 'block',
-          }}
+          className="block size-full rounded-full border-2 border-white/65 object-cover"
         />
       </div>
     );
@@ -50,21 +43,11 @@ export const AvatarDisplay: React.FC<AvatarDisplayProps> = ({
 
   return (
     <div
-      className={`avatar-fallback ${className}`}
+      className={`grid shrink-0 select-none place-items-center rounded-full border-2 border-white/40 bg-black/25 font-black text-white ${className}`}
       style={{
         width: size,
         height: size,
-        borderRadius: '50%',
-        backgroundColor: 'rgba(0, 0, 0, 0.25)',
-        border: '2px solid rgba(255, 255, 255, 0.4)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontWeight: 900,
         fontSize: size * 0.38,
-        color: '#FFFFFF',
-        flexShrink: 0,
-        userSelect: 'none',
       }}
     >
       {initials}
